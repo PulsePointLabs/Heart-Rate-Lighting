@@ -7,10 +7,9 @@ import org.junit.Test
 class LightingThemeTest {
     @Test fun eachThemeMapsEveryZone() {
         LightingTheme.entries.forEach { theme ->
-            HrZone.entries.forEach { zone ->
-                val style = theme.styleFor(zone)
-                assertEquals(zone.brightness, style.brightness)
-            }
+            val styles = HrZone.entries.map(theme::styleFor)
+            styles.forEach { style -> assertEquals(true, style.brightness in 10..100) }
+            assertEquals(styles.map { it.brightness }.sorted(), styles.map { it.brightness })
         }
     }
 

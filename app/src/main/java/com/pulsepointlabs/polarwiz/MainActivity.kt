@@ -59,9 +59,9 @@ class MainActivity : AppCompatActivity() {
         binding.offButton.setOnClickListener { viewModel.turnOff() }
         binding.themeSpinner.adapter = ArrayAdapter(
             this,
-            android.R.layout.simple_spinner_dropdown_item,
+            R.layout.spinner_theme_item,
             LightingTheme.entries.map { it.displayName }
-        )
+        ).apply { setDropDownViewResource(R.layout.spinner_theme_dropdown_item) }
         binding.themeSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
                 viewModel.setLightingTheme(LightingTheme.entries[position])

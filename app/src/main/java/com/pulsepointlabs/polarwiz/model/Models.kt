@@ -25,7 +25,8 @@ data class LightStyle(val color: Rgb?, val temperature: Int?, val brightness: In
 enum class LightingTheme(val displayName: String) {
     PULSE("Pulse — lavender to red"),
     OCEAN("Ocean — aqua to deep blue"),
-    EMBER("Ember — candlelight to fire");
+    EMBER("Ember — candlelight to fire"),
+    DAYLIGHT_TINT("Daylight Tint — bright with color accents");
 
     fun styleFor(zone: HrZone): LightStyle = when (this) {
         PULSE -> LightStyle(zone.color, zone.temperature, zone.brightness)
@@ -42,6 +43,13 @@ enum class LightingTheme(val displayName: String) {
             HrZone.VIOLET -> LightStyle(Rgb(255, 105, 20), null, 60)
             HrZone.PINK_RED -> LightStyle(Rgb(255, 45, 5), null, 80)
             HrZone.RED -> LightStyle(Rgb(255, 0, 0), null, 100)
+        }
+        DAYLIGHT_TINT -> when (zone) {
+            HrZone.WARM -> LightStyle(null, 5000, 80)
+            HrZone.LAVENDER -> LightStyle(Rgb(225, 215, 255), null, 85)
+            HrZone.VIOLET -> LightStyle(Rgb(210, 185, 255), null, 90)
+            HrZone.PINK_RED -> LightStyle(Rgb(255, 195, 215), null, 95)
+            HrZone.RED -> LightStyle(Rgb(255, 145, 125), null, 100)
         }
     }
 }

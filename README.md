@@ -34,7 +34,7 @@ APK output: `C:\PulsePoint-Standalone\polar-wiz-hr\app\build\outputs\apk\debug\a
 7. Enable **HR-controlled lighting**. The app uses a ~5-second rolling average, 3 BPM hysteresis, at least 3 seconds between commands, and sends only when the zone changes.
 8. To test without wearing the H10, enable **Demo BPM simulation**. It sweeps across all five zones.
 
-Choose **Pulse**, **Ocean**, or **Ember** under Lighting theme. Long-press any discovered light to replace `WiZ Light 1` with a local name such as `Bedroom Lamp`; aliases are stored only on the phone and keyed to the light's IP address.
+Choose **Pulse**, **Ocean**, **Ember**, or **Daylight Tint** under Lighting theme. Daylight Tint remains bright at 80–100%, beginning at 5000 K neutral daylight and adding pale lavender, violet, blush, and coral as HR rises. Long-press any discovered light to replace `WiZ Light 1` with a local name such as `Bedroom Lamp`; aliases are stored only on the phone and keyed to the light's IP address.
 
 Enable **Subtle heartbeat pulse** together with HR automation for a small brightness dip paced from smoothed BPM. It uses WiZ's native local `pulse` operation (`-8%`, roughly 120–220 ms), so the bulb restores itself without a second command. Pulse pacing is capped at two commands per second; normal zone commands remain throttled to one every three seconds.
 
