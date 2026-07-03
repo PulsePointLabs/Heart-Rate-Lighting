@@ -10,6 +10,7 @@ import com.pulsepointlabs.polarwiz.model.HrZone
 import com.pulsepointlabs.polarwiz.model.PolarDevice
 import com.pulsepointlabs.polarwiz.model.Rgb
 import com.pulsepointlabs.polarwiz.model.WizLight
+import com.pulsepointlabs.polarwiz.model.LightingTheme
 import com.pulsepointlabs.polarwiz.wiz.WizLanManager
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -28,6 +29,7 @@ data class UiState(
     val rrMs: Int? = null,
     val wizStatus: String = "No lights discovered",
     val lights: List<WizLight> = emptyList(),
+    val lightingTheme: LightingTheme = LightingTheme.PULSE,
     val automationEnabled: Boolean = false,
     val demoEnabled: Boolean = false,
     val zone: HrZone? = null,
@@ -39,6 +41,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val polar = PolarH10Manager(application, viewModelScope)
     private val wiz = WizLanManager(application)
     private val processor = HeartRateProcessor()
+    private val preferences = application.getSharedPreferences("polar_wiz_preferences", 0)
     private val _ui = MutableStateFlow(UiState())
     val ui: StateFlow<UiState> = _ui.asStateFlow()
     private var demoJob: Job? = null
@@ -62,8 +65,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _ui.value = _ui.value.copy(wizStatus = "Discovering on local Wi-Fi…", error = null)
             runCatching { wiz.discover() }
                 .onSuccess { found ->
+                    val named = found.sortedBy { it.address.hostAddress.orEmpty().split('.').lastOrNull()?.toIntOrNull() ?: 0 }
+                        .mapIndexed { index, light -> light.copy(name = savedLightName(light.address.hostAddress, index + 1)) }
                     _ui.value = _ui.value.copy(
-                        lights = found,
+                        lights = named,
                         wizStatus = if (found.isEmpty()) "No WiZ lights replied" else "${found.size} light(s) online"
                     )
                 }
@@ -77,13 +82,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         })
     }
 
+    fun renameLight(address: String, requestedName: String) {
+        val name = requestedName.trim().take(40)
+        if (name.isBlank()) return
+        preferences.edit().putString("light_name_$address", name).apply()
+        _ui.value = _ui.value.copy(lights = _ui.value.lights.map {
+            if (it.address.hostAddress == address) it.copy(name = name) else it
+        })
+    }
+
+    fun setLightingTheme(theme: LightingTheme) {
+        if (_ui.value.lightingTheme == theme) return
+        lastSentZone = null
+        _ui.value = _ui.value.copy(lightingTheme = theme)
+        if (_ui.value.automationEnabled) _ui.value.zone?.let(::queueAutomation)
+    }
+
     fun addLightByIp(rawIp: String) {
         viewModelScope.launch {
             runCatching {
                 val ip = rawIp.trim()
                 require(IPV4.matches(ip)) { "Enter a numeric IPv4 address" }
                 val address = with(kotlinx.coroutines.Dispatchers.IO) { InetAddress.getByName(ip) }
-                val light = WizLight(address = address, name = "Manual WiZ light")
+                val light = WizLight(address = address, name = savedLightName(ip, _ui.value.lights.size + 1))
                 _ui.value = _ui.value.copy(
                     lights = (_ui.value.lights.filterNot { it.address.hostAddress == ip } + light),
                     wizStatus = "Manual light added: $ip",
@@ -148,11 +169,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val remaining = (lastCommandAt + MIN_COMMAND_INTERVAL_MS - System.currentTimeMillis()).coerceAtLeast(0)
             delay(remaining)
             if (!_ui.value.automationEnabled || _ui.value.zone != zone || lastSentZone == zone) return@launch
-            wiz.setColor(selectedLights(), zone.color, zone.brightness, zone.temperature).fold(
+            val style = _ui.value.lightingTheme.styleFor(zone)
+            wiz.setColor(selectedLights(), style.color, style.brightness, style.temperature).fold(
                 onSuccess = {
                     lastSentZone = zone
                     lastCommandAt = System.currentTimeMillis()
-                    _ui.value = _ui.value.copy(lastCommand = "${zone.label}, ${zone.brightness}%", error = null)
+                    _ui.value = _ui.value.copy(lastCommand = "${_ui.value.lightingTheme.displayName}: ${zone.label}, ${style.brightness}%", error = null)
                 },
                 onFailure = { setError("Automation command failed: ${it.message}") }
             )
@@ -160,6 +182,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun selectedLights() = _ui.value.lights.filter { it.selected && it.online }
+    private fun savedLightName(address: String?, number: Int): String =
+        address?.let { preferences.getString("light_name_$it", null) } ?: "WiZ Light $number"
     private fun setError(message: String) { Log.e(TAG, message); _ui.value = _ui.value.copy(error = message) }
 
     override fun onCleared() { polar.close(); super.onCleared() }

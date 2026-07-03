@@ -39,6 +39,9 @@
         </LinearLayout>
 
         <TextView style="@style/SectionTitle" android:text="Automation" />
+        <TextView style="@style/BodyText" android:text="Lighting theme" />
+        <Spinner android:id="@+id/themeSpinner" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:minHeight="48dp" android:popupBackground="@color/panel" />
         <androidx.appcompat.widget.SwitchCompat
             android:id="@+id/automationSwitch" android:layout_width="match_parent" android:layout_height="wrap_content"
             android:text="Enable HR-controlled lighting" android:textColor="@color/text_primary" />

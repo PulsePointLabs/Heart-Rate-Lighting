@@ -19,3 +19,29 @@ enum class HrZone(val label: String, val min: Int, val color: Rgb?, val temperat
     PINK_RED("Pink / red", 120, Rgb(255, 35, 85), null, 80),
     RED("Bright red", 140, Rgb(255, 0, 0), null, 100)
 }
+
+data class LightStyle(val color: Rgb?, val temperature: Int?, val brightness: Int)
+
+enum class LightingTheme(val displayName: String) {
+    PULSE("Pulse — lavender to red"),
+    OCEAN("Ocean — aqua to deep blue"),
+    EMBER("Ember — candlelight to fire");
+
+    fun styleFor(zone: HrZone): LightStyle = when (this) {
+        PULSE -> LightStyle(zone.color, zone.temperature, zone.brightness)
+        OCEAN -> when (zone) {
+            HrZone.WARM -> LightStyle(Rgb(70, 190, 180), null, 25)
+            HrZone.LAVENDER -> LightStyle(Rgb(50, 220, 255), null, 40)
+            HrZone.VIOLET -> LightStyle(Rgb(30, 120, 255), null, 60)
+            HrZone.PINK_RED -> LightStyle(Rgb(35, 40, 255), null, 80)
+            HrZone.RED -> LightStyle(Rgb(155, 20, 255), null, 100)
+        }
+        EMBER -> when (zone) {
+            HrZone.WARM -> LightStyle(null, 2200, 25)
+            HrZone.LAVENDER -> LightStyle(Rgb(255, 180, 45), null, 40)
+            HrZone.VIOLET -> LightStyle(Rgb(255, 105, 20), null, 60)
+            HrZone.PINK_RED -> LightStyle(Rgb(255, 45, 5), null, 80)
+            HrZone.RED -> LightStyle(Rgb(255, 0, 0), null, 100)
+        }
+    }
+}

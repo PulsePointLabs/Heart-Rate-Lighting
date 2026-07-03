@@ -5,6 +5,10 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import android.widget.CheckBox
 import android.widget.TextView
+import android.widget.ArrayAdapter
+import android.widget.AdapterView
+import android.widget.EditText
+import androidx.appcompat.app.AlertDialog
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
@@ -14,13 +18,14 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.pulsepointlabs.polarwiz.databinding.ActivityMainBinding
 import com.pulsepointlabs.polarwiz.model.Rgb
+import com.pulsepointlabs.polarwiz.model.LightingTheme
 import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private val viewModel: MainViewModel by viewModels()
     private var renderedPolarIds = emptyList<String>()
-    private var renderedLights = emptyList<Pair<String, Boolean>>()
+    private var renderedLights = emptyList<Triple<String, Boolean, String>>()
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -44,6 +49,17 @@ class MainActivity : AppCompatActivity() {
         binding.violetButton.setOnClickListener { viewModel.manualColor(Rgb(135, 50, 255), brightness()) }
         binding.redButton.setOnClickListener { viewModel.manualColor(Rgb(255, 0, 0), brightness()) }
         binding.offButton.setOnClickListener { viewModel.turnOff() }
+        binding.themeSpinner.adapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_spinner_dropdown_item,
+            LightingTheme.entries.map { it.displayName }
+        )
+        binding.themeSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
+                viewModel.setLightingTheme(LightingTheme.entries[position])
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -69,6 +85,8 @@ class MainActivity : AppCompatActivity() {
         errorText.text = state.error.orEmpty()
         if (demoSwitch.isChecked != state.demoEnabled) demoSwitch.isChecked = state.demoEnabled
         if (automationSwitch.isChecked != state.automationEnabled) automationSwitch.isChecked = state.automationEnabled
+        val themePosition = LightingTheme.entries.indexOf(state.lightingTheme)
+        if (themeSpinner.selectedItemPosition != themePosition) themeSpinner.setSelection(themePosition)
 
         val polarIds = state.polarDevices.map { it.id }
         if (polarIds != renderedPolarIds) {
@@ -85,17 +103,21 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        val lightKeys = state.lights.map { (it.address.hostAddress ?: "") to it.selected }
+        val lightKeys = state.lights.map { Triple(it.address.hostAddress ?: "", it.selected, it.name) }
         if (lightKeys != renderedLights) {
             renderedLights = lightKeys
             wizLightList.removeAllViews()
             state.lights.forEach { light ->
                 wizLightList.addView(CheckBox(this@MainActivity).apply {
-                    text = "${light.name} • ${light.address.hostAddress} • ${if (light.online) "online" else "offline"}"
+                    text = "${light.name}  •  ${light.address.hostAddress}  •  ${if (light.online) "Online" else "Offline"}"
                     setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
                     isChecked = light.selected
                     setOnCheckedChangeListener { _, checked ->
                         viewModel.setLightSelected(light.address.hostAddress ?: return@setOnCheckedChangeListener, checked)
+                    }
+                    setOnLongClickListener {
+                        showRenameLightDialog(light.address.hostAddress.orEmpty(), light.name)
+                        true
                     }
                 })
             }
@@ -103,4 +125,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun brightness() = binding.brightnessSeek.progress.coerceAtLeast(10)
+
+    private fun showRenameLightDialog(address: String, currentName: String) {
+        val input = EditText(this).apply { setText(currentName); selectAll() }
+        AlertDialog.Builder(this)
+            .setTitle("Name this WiZ light")
+            .setMessage(address)
+            .setView(input)
+            .setPositiveButton("Save") { _, _ -> viewModel.renameLight(address, input.text.toString()) }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
 }

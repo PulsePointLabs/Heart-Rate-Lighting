@@ -34,6 +34,8 @@ APK output: `C:\PulsePoint-Standalone\polar-wiz-hr\app\build\outputs\apk\debug\a
 7. Enable **HR-controlled lighting**. The app uses a ~5-second rolling average, 3 BPM hysteresis, at least 3 seconds between commands, and sends only when the zone changes.
 8. To test without wearing the H10, enable **Demo BPM simulation**. It sweeps across all five zones.
 
+Choose **Pulse**, **Ocean**, or **Ember** under Lighting theme. Long-press any discovered light to replace `WiZ Light 1` with a local name such as `Bedroom Lamp`; aliases are stored only on the phone and keyed to the light's IP address.
+
 ## Permissions by Android version
 
 - Android 12+ BLE scanning/connection uses runtime `BLUETOOTH_SCAN` and `BLUETOOTH_CONNECT` (shown as Nearby devices). The app requests these when Scan is tapped and handles denial without crashing.
