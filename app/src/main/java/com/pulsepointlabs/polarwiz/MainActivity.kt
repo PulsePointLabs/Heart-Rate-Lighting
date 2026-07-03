@@ -31,7 +31,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private val viewModel: MainViewModel by viewModels()
     private var renderedPolarIds = emptyList<String>()
-    private var renderedLights = emptyList<Triple<String, Boolean, String>>()
+    private var renderedLights = emptyList<String>()
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -58,6 +58,15 @@ class MainActivity : AppCompatActivity() {
             viewModel.setAutomation(checked)
         }
         binding.heartbeatPulseSwitch.setOnCheckedChangeListener { _, checked -> viewModel.setHeartbeatPulse(checked) }
+        binding.heartbeatIntensitySeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) binding.heartbeatIntensityLabel.text = "Heartbeat reaction: ${progress.coerceIn(2, 40)}%"
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {
+                viewModel.setHeartbeatPulseIntensity(binding.heartbeatIntensitySeek.progress)
+            }
+        })
         binding.warmButton.setOnClickListener { viewModel.manualColor(null, brightness(), 2700) }
         binding.violetButton.setOnClickListener { viewModel.manualColor(Rgb(135, 50, 255), brightness()) }
         binding.redButton.setOnClickListener { viewModel.manualColor(Rgb(255, 0, 0), brightness()) }
@@ -116,6 +125,10 @@ class MainActivity : AppCompatActivity() {
         if (demoSwitch.isChecked != state.demoEnabled) demoSwitch.isChecked = state.demoEnabled
         if (automationSwitch.isChecked != state.automationEnabled) automationSwitch.isChecked = state.automationEnabled
         if (heartbeatPulseSwitch.isChecked != state.heartbeatPulseEnabled) heartbeatPulseSwitch.isChecked = state.heartbeatPulseEnabled
+        if (!heartbeatIntensitySeek.isPressed && heartbeatIntensitySeek.progress != state.heartbeatPulseIntensity) {
+            heartbeatIntensitySeek.progress = state.heartbeatPulseIntensity
+        }
+        heartbeatIntensityLabel.text = "Heartbeat reaction: ${state.heartbeatPulseIntensity}%"
         val displayedBrightness = state.brightnessOverride
             ?: state.zone?.let { state.lightingTheme.styleFor(it).brightness }
             ?: 60
@@ -148,7 +161,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        val lightKeys = state.lights.map { Triple(it.address.hostAddress ?: "", it.selected, it.name) }
+        val lightKeys = state.lights.map { "${it.address.hostAddress}|${it.selected}|${it.name}|${it.group}|${it.online}" }
         if (lightKeys != renderedLights) {
             renderedLights = lightKeys
             wizLightList.removeAllViews()
@@ -178,26 +191,35 @@ class MainActivity : AppCompatActivity() {
                         viewModel.setLightSelected(address, checked)
                     }
                     setOnLongClickListener {
-                        showEditLightDialog(address, light.name, light.group)
+                        showRenameLightDialog(address, light.name)
                         true
                     }
                 })
                 row.addView(ImageButton(this@MainActivity).apply {
                     setImageResource(R.drawable.ic_edit)
                     background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_icon_button)
-                    contentDescription = "Edit ${light.name} name and group"
+                    contentDescription = "Rename ${light.name}"
                     tooltipText = "Rename light"
-                    setPadding(11, 11, 11, 11)
-                    layoutParams = LinearLayout.LayoutParams(dp(44), dp(44)).apply { setMargins(dp(4), 0, dp(4), 0) }
-                    setOnClickListener { showEditLightDialog(address, light.name, light.group) }
+                    setPadding(9, 9, 9, 9)
+                    layoutParams = LinearLayout.LayoutParams(dp(40), dp(40)).apply { setMargins(dp(3), 0, dp(3), 0) }
+                    setOnClickListener { showRenameLightDialog(address, light.name) }
+                })
+                row.addView(ImageButton(this@MainActivity).apply {
+                    setImageResource(R.drawable.ic_group)
+                    background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_icon_button)
+                    contentDescription = "Assign ${light.name} to a group"
+                    tooltipText = "Assign group"
+                    setPadding(9, 9, 9, 9)
+                    layoutParams = LinearLayout.LayoutParams(dp(40), dp(40)).apply { setMargins(dp(3), 0, dp(3), 0) }
+                    setOnClickListener { showLightGroupPicker(address, light.name, light.group) }
                 })
                 row.addView(ImageButton(this@MainActivity).apply {
                     setImageResource(R.drawable.ic_identify)
                     background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_icon_button_primary)
                     contentDescription = "Flash ${light.name} to identify it"
                     tooltipText = "Identify light"
-                    setPadding(11, 11, 11, 11)
-                    layoutParams = LinearLayout.LayoutParams(dp(44), dp(44)).apply { setMargins(dp(4), 0, 0, 0) }
+                    setPadding(9, 9, 9, 9)
+                    layoutParams = LinearLayout.LayoutParams(dp(40), dp(40)).apply { setMargins(dp(3), 0, 0, 0) }
                     setOnClickListener { viewModel.identifyLight(address) }
                 })
                 wizLightList.addView(row)
@@ -216,29 +238,20 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun showEditLightDialog(address: String, currentName: String, currentGroup: String) {
+    private fun showRenameLightDialog(address: String, currentName: String) {
         val nameInput = EditText(this).apply { hint = "Light name"; setText(currentName); selectAll() }
-        val groupInput = EditText(this).apply { hint = "Room or group"; setText(currentGroup) }
-        val fields = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), 0, dp(20), 0)
-            addView(nameInput)
-            addView(groupInput)
-        }
         AlertDialog.Builder(this)
-            .setTitle("Edit WiZ light")
+            .setTitle("Rename WiZ light")
             .setMessage(address)
-            .setView(fields)
-            .setPositiveButton("Save") { _, _ ->
-                viewModel.updateLightDetails(address, nameInput.text.toString(), groupInput.text.toString())
-            }
+            .setView(nameInput)
+            .setPositiveButton("Save") { _, _ -> viewModel.renameLight(address, nameInput.text.toString()) }
             .setNegativeButton("Cancel", null)
             .show()
     }
 
     private fun showGroupPicker() {
         val state = viewModel.ui.value
-        val groups = (listOf("All lights") + state.lights.map { it.group }.filter { it.isNotBlank() }).distinct().toTypedArray()
+        val groups = state.groups.toTypedArray()
         val checked = groups.indexOf(state.activeGroup).coerceAtLeast(0)
         AlertDialog.Builder(this)
             .setTitle("Control group")
@@ -246,6 +259,34 @@ class MainActivity : AppCompatActivity() {
                 viewModel.setActiveGroup(groups[which])
                 dialog.dismiss()
             }
+            .setPositiveButton("New group") { _, _ -> showCreateGroupDialog() }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showCreateGroupDialog(assignAddress: String? = null, lightName: String? = null) {
+        val input = EditText(this).apply { hint = "Room or group name" }
+        AlertDialog.Builder(this)
+            .setTitle(if (lightName == null) "Create group" else "New group for $lightName")
+            .setView(input)
+            .setPositiveButton("Create") { _, _ ->
+                val name = input.text.toString().trim()
+                if (viewModel.createGroup(name) && assignAddress != null) viewModel.assignLightGroup(assignAddress, name)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showLightGroupPicker(address: String, lightName: String, currentGroup: String) {
+        val groups = viewModel.ui.value.groups.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("Assign $lightName")
+            .setSingleChoiceItems(groups, groups.indexOf(currentGroup).coerceAtLeast(0)) { dialog, which ->
+                viewModel.assignLightGroup(address, groups[which])
+                dialog.dismiss()
+            }
+            .setPositiveButton("New group") { _, _ -> showCreateGroupDialog(address, lightName) }
+            .setNegativeButton("Cancel", null)
             .show()
     }
 

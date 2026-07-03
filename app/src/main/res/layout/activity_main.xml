@@ -73,6 +73,10 @@
             <androidx.appcompat.widget.SwitchCompat android:id="@+id/heartbeatPulseSwitch"
                 android:layout_width="match_parent" android:layout_height="48dp"
                 android:text="Subtle heartbeat pulse" android:textColor="@color/text_primary" />
+            <TextView android:id="@+id/heartbeatIntensityLabel" style="@style/BodyText"
+                android:text="Heartbeat reaction: 8%" />
+            <SeekBar android:id="@+id/heartbeatIntensitySeek" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:min="2" android:max="40" android:progress="8" />
             <TextView android:id="@+id/zoneText" style="@style/MetricText" android:text="Zone: --" />
             <TextView android:id="@+id/lastCommandText" style="@style/BodyText" android:text="Last command: none" android:maxLines="3" android:ellipsize="end" />
             <TextView android:id="@+id/errorText" style="@style/BodyText" android:textColor="#FFFCA5A5" android:maxLines="3" android:ellipsize="end" />

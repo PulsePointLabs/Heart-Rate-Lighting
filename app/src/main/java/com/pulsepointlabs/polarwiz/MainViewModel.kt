@@ -40,8 +40,10 @@ data class UiState(
     val brightnessOverride: Int? = null,
     val automationEnabled: Boolean = false,
     val heartbeatPulseEnabled: Boolean = false,
+    val heartbeatPulseIntensity: Int = 8,
     val automationPaused: Boolean = false,
     val activeGroup: String = "All lights",
+    val groups: List<String> = listOf("All lights"),
     val demoEnabled: Boolean = false,
     val zone: HrZone? = null,
     val lastCommand: String = "none",
@@ -55,6 +57,7 @@ class LightingRuntime(private val application: Application) {
     private val processor = HeartRateProcessor()
     private val preferences = application.getSharedPreferences("polar_wiz_preferences", 0)
     private val restoredLights = loadSavedLights()
+    private val restoredGroups = loadSavedGroups(restoredLights)
     private val _ui = MutableStateFlow(
         UiState(
             wizStatus = if (restoredLights.isEmpty()) "No lights discovered" else "Restored ${restoredLights.size} saved light(s)",
@@ -64,7 +67,11 @@ class LightingRuntime(private val application: Application) {
             }.getOrDefault(LightingTheme.PULSE),
             brightnessOverride = preferences.getInt("brightness_override", -1).takeIf { it in 10..100 },
             automationEnabled = preferences.getBoolean("automation_enabled", false),
-            heartbeatPulseEnabled = preferences.getBoolean("heartbeat_pulse_enabled", false)
+            heartbeatPulseEnabled = preferences.getBoolean("heartbeat_pulse_enabled", false),
+            heartbeatPulseIntensity = preferences.getInt("heartbeat_pulse_intensity", 8).coerceIn(2, 40),
+            groups = restoredGroups,
+            activeGroup = preferences.getString("active_group", "All lights")
+                ?.takeIf { it in restoredGroups } ?: "All lights"
         )
     )
     val ui: StateFlow<UiState> = _ui.asStateFlow()
@@ -184,18 +191,33 @@ class LightingRuntime(private val application: Application) {
         persistLights()
     }
 
-    fun updateLightDetails(address: String, requestedName: String, requestedGroup: String) {
-        val name = requestedName.trim().take(40).ifBlank { return }
-        val group = requestedGroup.trim().take(30).ifBlank { "All lights" }
+    fun assignLightGroup(address: String, requestedGroup: String) {
+        val requested = requestedGroup.trim().take(30).ifBlank { "All lights" }
         val light = _ui.value.lights.firstOrNull { it.address.hostAddress == address } ?: return
-        preferences.edit().putString("light_name_${light.deviceId}", name).apply()
+        val group = _ui.value.groups.firstOrNull { it.equals(requested, ignoreCase = true) }
+            ?: requested.also { createGroup(it, activate = false) }
         _ui.value = _ui.value.copy(lights = _ui.value.lights.map {
-            if (it.deviceId == light.deviceId) it.copy(name = name, group = group) else it
+            if (it.deviceId == light.deviceId) it.copy(group = group) else it
         })
         persistLights()
     }
 
-    fun setActiveGroup(group: String) { _ui.value = _ui.value.copy(activeGroup = group) }
+    fun createGroup(requestedName: String, activate: Boolean = true): Boolean {
+        val name = requestedName.trim().take(30)
+        if (name.isBlank() || name.equals("All lights", ignoreCase = true)) return false
+        val canonicalName = _ui.value.groups.firstOrNull { it.equals(name, ignoreCase = true) } ?: name
+        val groups = (_ui.value.groups + canonicalName).distinctBy { it.lowercase() }
+        _ui.value = _ui.value.copy(groups = groups, activeGroup = if (activate) canonicalName else _ui.value.activeGroup)
+        persistGroups()
+        if (activate) preferences.edit().putString("active_group", canonicalName).apply()
+        return true
+    }
+
+    fun setActiveGroup(group: String) {
+        if (group !in _ui.value.groups) return
+        _ui.value = _ui.value.copy(activeGroup = group)
+        preferences.edit().putString("active_group", group).apply()
+    }
 
     fun setAutomationPaused(paused: Boolean) {
         _ui.value = _ui.value.copy(automationPaused = paused)
@@ -326,7 +348,7 @@ class LightingRuntime(private val application: Application) {
                         val intervalMs = (state.rrMs?.toLong()?.coerceIn(300L, 2_000L)
                             ?: (60_000L / bpm.coerceIn(40, 200))).coerceAtLeast(500L)
                         val durationMs = (intervalMs / 3).toInt().coerceIn(120, 220)
-                        wiz.pulse(selectedLights(), delta = -8, durationMs = durationMs)
+                        wiz.pulse(selectedLights(), delta = -state.heartbeatPulseIntensity, durationMs = durationMs)
                             .onFailure { Log.w(TAG, "Heartbeat pulse skipped: ${it.message}") }
                         delay(intervalMs)
                     } else {
@@ -335,6 +357,12 @@ class LightingRuntime(private val application: Application) {
                 }
             }
         }
+    }
+
+    fun setHeartbeatPulseIntensity(intensity: Int) {
+        val value = intensity.coerceIn(2, 40)
+        _ui.value = _ui.value.copy(heartbeatPulseIntensity = value)
+        preferences.edit().putInt("heartbeat_pulse_intensity", value).apply()
     }
 
     fun setDemo(enabled: Boolean) {
@@ -419,6 +447,21 @@ class LightingRuntime(private val application: Application) {
         preferences.edit().putString("saved_lights", array.toString()).apply()
     }
 
+    private fun persistGroups() {
+        val array = JSONArray()
+        _ui.value.groups.filterNot { it == "All lights" }.forEach(array::put)
+        preferences.edit().putString("saved_groups", array.toString()).apply()
+    }
+
+    private fun loadSavedGroups(lights: List<WizLight>): List<String> = runCatching {
+        val saved = JSONArray(preferences.getString("saved_groups", "[]"))
+        buildList {
+            add("All lights")
+            for (index in 0 until saved.length()) saved.optString(index).takeIf { it.isNotBlank() }?.let(::add)
+            lights.map { it.group }.filter { it.isNotBlank() && it != "All lights" }.forEach(::add)
+        }.distinctBy { it.lowercase() }
+    }.getOrDefault(listOf("All lights"))
+
     private fun loadSavedLights(): List<WizLight> = runCatching {
         val array = JSONArray(preferences.getString("saved_lights", "[]"))
         buildList {
@@ -478,7 +521,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun discoverLights() = runtime.discoverLights()
     fun setLightSelected(address: String, selected: Boolean) = runtime.setLightSelected(address, selected)
     fun renameLight(address: String, name: String) = runtime.renameLight(address, name)
-    fun updateLightDetails(address: String, name: String, group: String) = runtime.updateLightDetails(address, name, group)
+    fun assignLightGroup(address: String, group: String) = runtime.assignLightGroup(address, group)
+    fun createGroup(name: String) = runtime.createGroup(name)
     fun setActiveGroup(group: String) = runtime.setActiveGroup(group)
     fun setAutomationPaused(paused: Boolean) = runtime.setAutomationPaused(paused)
     fun identifyLight(address: String) = runtime.identifyLight(address)
@@ -490,5 +534,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun turnOff() = runtime.turnOff()
     fun setAutomation(enabled: Boolean) = runtime.setAutomation(enabled)
     fun setHeartbeatPulse(enabled: Boolean) = runtime.setHeartbeatPulse(enabled)
+    fun setHeartbeatPulseIntensity(intensity: Int) = runtime.setHeartbeatPulseIntensity(intensity)
     fun setDemo(enabled: Boolean) = runtime.setDemo(enabled)
 }
