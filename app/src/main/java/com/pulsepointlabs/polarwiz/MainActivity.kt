@@ -9,8 +9,8 @@ import android.widget.TextView
 import android.widget.ArrayAdapter
 import android.widget.AdapterView
 import android.widget.EditText
-import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.ImageButton
 import android.content.res.ColorStateList
 import androidx.appcompat.app.AlertDialog
 import androidx.activity.result.contract.ActivityResultContracts
@@ -130,18 +130,23 @@ class MainActivity : AppCompatActivity() {
             state.lights.forEach { light ->
                 val address = light.address.hostAddress.orEmpty()
                 val row = LinearLayout(this@MainActivity).apply {
-                    orientation = LinearLayout.VERTICAL
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = android.view.Gravity.CENTER_VERTICAL
                     background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_list_item)
-                    setPadding(10, 6, 10, 10)
+                    setPadding(8, 6, 8, 6)
                     layoutParams = LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT
                     ).apply { setMargins(0, 6, 0, 6) }
                 }
                 row.addView(CheckBox(this@MainActivity).apply {
-                    text = "${light.name}  •  ${light.address.hostAddress}  •  ${if (light.online) "Online" else "Offline"}"
+                    text = "${light.name}\n${light.address.hostAddress}  •  ${if (light.online) "Online" else "Offline"}"
                     setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
                     buttonTintList = ColorStateList.valueOf(ContextCompat.getColor(this@MainActivity, R.color.accent))
+                    textSize = 15f
+                    maxLines = 2
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
                     isChecked = light.selected
                     setOnCheckedChangeListener { _, checked ->
                         viewModel.setLightSelected(address, checked)
@@ -151,23 +156,23 @@ class MainActivity : AppCompatActivity() {
                         true
                     }
                 })
-                row.addView(LinearLayout(this@MainActivity).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = android.view.Gravity.END
-                    addView(Button(this@MainActivity).apply {
-                        text = "Name"
-                        isAllCaps = false
-                        backgroundTintList = ColorStateList.valueOf(ContextCompat.getColor(this@MainActivity, R.color.panel_variant))
-                        setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
-                        setOnClickListener { showRenameLightDialog(address, light.name) }
-                    })
-                    addView(Button(this@MainActivity).apply {
-                        text = "Identify"
-                        isAllCaps = false
-                        backgroundTintList = ColorStateList.valueOf(ContextCompat.getColor(this@MainActivity, R.color.accent))
-                        setTextColor(ContextCompat.getColor(this@MainActivity, R.color.accent_dark))
-                        setOnClickListener { viewModel.identifyLight(address) }
-                    })
+                row.addView(ImageButton(this@MainActivity).apply {
+                    setImageResource(R.drawable.ic_edit)
+                    background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_icon_button)
+                    contentDescription = "Rename ${light.name}"
+                    tooltipText = "Rename light"
+                    setPadding(11, 11, 11, 11)
+                    layoutParams = LinearLayout.LayoutParams(dp(44), dp(44)).apply { setMargins(dp(4), 0, dp(4), 0) }
+                    setOnClickListener { showRenameLightDialog(address, light.name) }
+                })
+                row.addView(ImageButton(this@MainActivity).apply {
+                    setImageResource(R.drawable.ic_identify)
+                    background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_icon_button_primary)
+                    contentDescription = "Flash ${light.name} to identify it"
+                    tooltipText = "Identify light"
+                    setPadding(11, 11, 11, 11)
+                    layoutParams = LinearLayout.LayoutParams(dp(44), dp(44)).apply { setMargins(dp(4), 0, 0, 0) }
+                    setOnClickListener { viewModel.identifyLight(address) }
                 })
                 wizLightList.addView(row)
             }
@@ -175,6 +180,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun brightness() = binding.brightnessSeek.progress.coerceAtLeast(10)
+    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 
     private fun requestNotificationPermissionIfNeeded() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&

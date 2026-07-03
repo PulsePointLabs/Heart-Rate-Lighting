@@ -51,7 +51,7 @@
             <SeekBar android:id="@+id/brightnessSeek" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="100" android:progress="60" />
             <LinearLayout style="@style/ButtonRow">
                 <Button android:id="@+id/warmButton" style="@style/ActionButton" android:text="Warm" />
-                <Button android:id="@+id/violetButton" style="@style/ActionButton" android:text="Violet" />
+                <Button android:id="@+id/violetButton" style="@style/ActionButton" android:text="Purple" />
                 <Button android:id="@+id/redButton" style="@style/ActionButton" android:text="Red" />
                 <Button android:id="@+id/offButton" style="@style/ActionButton" android:text="Off" android:textColor="#FFFCA5A5" />
             </LinearLayout>
@@ -69,8 +69,8 @@
                 android:layout_width="match_parent" android:layout_height="48dp"
                 android:text="Subtle heartbeat pulse" android:textColor="@color/text_primary" />
             <TextView android:id="@+id/zoneText" style="@style/MetricText" android:text="Zone: --" />
-            <TextView android:id="@+id/lastCommandText" style="@style/BodyText" android:text="Last command: none" />
-            <TextView android:id="@+id/errorText" style="@style/BodyText" android:textColor="#FFFCA5A5" />
+            <TextView android:id="@+id/lastCommandText" style="@style/BodyText" android:text="Last command: none" android:maxLines="3" android:ellipsize="end" />
+            <TextView android:id="@+id/errorText" style="@style/BodyText" android:textColor="#FFFCA5A5" android:maxLines="3" android:ellipsize="end" />
         </LinearLayout>
     </LinearLayout>
 </ScrollView>
