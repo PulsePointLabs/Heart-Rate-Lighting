@@ -32,6 +32,7 @@ data class UiState(
     val wizStatus: String = "No lights discovered",
     val lights: List<WizLight> = emptyList(),
     val lightingTheme: LightingTheme = LightingTheme.PULSE,
+    val brightnessOverride: Int? = null,
     val automationEnabled: Boolean = false,
     val heartbeatPulseEnabled: Boolean = false,
     val demoEnabled: Boolean = false,
@@ -45,7 +46,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val wiz = WizLanManager(application)
     private val processor = HeartRateProcessor()
     private val preferences = application.getSharedPreferences("polar_wiz_preferences", 0)
-    private val _ui = MutableStateFlow(UiState())
+    private val _ui = MutableStateFlow(
+        UiState(brightnessOverride = preferences.getInt("brightness_override", -1).takeIf { it in 10..100 })
+    )
     val ui: StateFlow<UiState> = _ui.asStateFlow()
     private var demoJob: Job? = null
     private var automationJob: Job? = null
@@ -124,6 +127,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_ui.value.lightingTheme == theme) return
         lastSentZone = null
         _ui.value = _ui.value.copy(lightingTheme = theme)
+        if (_ui.value.automationEnabled) _ui.value.zone?.let(::queueAutomation)
+    }
+
+    fun setAutomationBrightness(brightness: Int) {
+        val value = brightness.coerceIn(10, 100)
+        preferences.edit().putInt("brightness_override", value).apply()
+        _ui.value = _ui.value.copy(brightnessOverride = value)
+        lastSentZone = null
+        if (_ui.value.automationEnabled) _ui.value.zone?.let(::queueAutomation)
+    }
+
+    fun clearAutomationBrightness() {
+        preferences.edit().remove("brightness_override").apply()
+        _ui.value = _ui.value.copy(brightnessOverride = null)
+        lastSentZone = null
         if (_ui.value.automationEnabled) _ui.value.zone?.let(::queueAutomation)
     }
 
@@ -223,11 +241,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             delay(remaining)
             if (!_ui.value.automationEnabled || _ui.value.zone != zone || lastSentZone == zone) return@launch
             val style = _ui.value.lightingTheme.styleFor(zone)
-            wiz.setColor(selectedLights(), style.color, style.brightness, style.temperature).fold(
+            val brightness = _ui.value.brightnessOverride ?: style.brightness
+            wiz.setColor(selectedLights(), style.color, brightness, style.temperature).fold(
                 onSuccess = {
                     lastSentZone = zone
                     lastCommandAt = System.currentTimeMillis()
-                    _ui.value = _ui.value.copy(lastCommand = "${_ui.value.lightingTheme.displayName}: ${zone.label}, ${style.brightness}%", error = null)
+                    _ui.value = _ui.value.copy(lastCommand = "${_ui.value.lightingTheme.displayName}: ${zone.label}, $brightness%", error = null)
                 },
                 onFailure = { setError("Automation command failed: ${it.message}") }
             )

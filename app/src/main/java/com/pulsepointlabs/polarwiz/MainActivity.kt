@@ -11,6 +11,7 @@ import android.widget.AdapterView
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ImageButton
+import android.widget.SeekBar
 import android.content.res.ColorStateList
 import androidx.appcompat.app.AlertDialog
 import androidx.activity.result.contract.ActivityResultContracts
@@ -60,6 +61,16 @@ class MainActivity : AppCompatActivity() {
         binding.violetButton.setOnClickListener { viewModel.manualColor(Rgb(135, 50, 255), brightness()) }
         binding.redButton.setOnClickListener { viewModel.manualColor(Rgb(255, 0, 0), brightness()) }
         binding.offButton.setOnClickListener { viewModel.turnOff() }
+        binding.brightnessSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) binding.brightnessLabel.text = "Brightness override: ${progress.coerceAtLeast(10)}%"
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {
+                viewModel.setAutomationBrightness(binding.brightnessSeek.progress)
+            }
+        })
+        binding.themeBrightnessButton.setOnClickListener { viewModel.clearAutomationBrightness() }
         binding.themeSpinner.adapter = ArrayAdapter(
             this,
             R.layout.spinner_theme_item,
@@ -97,6 +108,12 @@ class MainActivity : AppCompatActivity() {
         if (demoSwitch.isChecked != state.demoEnabled) demoSwitch.isChecked = state.demoEnabled
         if (automationSwitch.isChecked != state.automationEnabled) automationSwitch.isChecked = state.automationEnabled
         if (heartbeatPulseSwitch.isChecked != state.heartbeatPulseEnabled) heartbeatPulseSwitch.isChecked = state.heartbeatPulseEnabled
+        val displayedBrightness = state.brightnessOverride
+            ?: state.zone?.let { state.lightingTheme.styleFor(it).brightness }
+            ?: 60
+        if (!brightnessSeek.isPressed && brightnessSeek.progress != displayedBrightness) brightnessSeek.progress = displayedBrightness
+        brightnessLabel.text = state.brightnessOverride?.let { "Brightness override: $it%" }
+            ?: "Brightness: theme default ($displayedBrightness%)"
         val themePosition = LightingTheme.entries.indexOf(state.lightingTheme)
         if (themeSpinner.selectedItemPosition != themePosition) themeSpinner.setSelection(themePosition)
 
