@@ -45,6 +45,7 @@ class MainActivity : AppCompatActivity() {
         binding.addIpButton.setOnClickListener { viewModel.addLightByIp(binding.manualIpText.text.toString()) }
         binding.demoSwitch.setOnCheckedChangeListener { _, checked -> viewModel.setDemo(checked) }
         binding.automationSwitch.setOnCheckedChangeListener { _, checked -> viewModel.setAutomation(checked) }
+        binding.heartbeatPulseSwitch.setOnCheckedChangeListener { _, checked -> viewModel.setHeartbeatPulse(checked) }
         binding.warmButton.setOnClickListener { viewModel.manualColor(null, brightness(), 2700) }
         binding.violetButton.setOnClickListener { viewModel.manualColor(Rgb(135, 50, 255), brightness()) }
         binding.redButton.setOnClickListener { viewModel.manualColor(Rgb(255, 0, 0), brightness()) }
@@ -85,6 +86,7 @@ class MainActivity : AppCompatActivity() {
         errorText.text = state.error.orEmpty()
         if (demoSwitch.isChecked != state.demoEnabled) demoSwitch.isChecked = state.demoEnabled
         if (automationSwitch.isChecked != state.automationEnabled) automationSwitch.isChecked = state.automationEnabled
+        if (heartbeatPulseSwitch.isChecked != state.heartbeatPulseEnabled) heartbeatPulseSwitch.isChecked = state.heartbeatPulseEnabled
         val themePosition = LightingTheme.entries.indexOf(state.lightingTheme)
         if (themeSpinner.selectedItemPosition != themePosition) themeSpinner.setSelection(themePosition)
 

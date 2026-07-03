@@ -31,6 +31,7 @@ data class UiState(
     val lights: List<WizLight> = emptyList(),
     val lightingTheme: LightingTheme = LightingTheme.PULSE,
     val automationEnabled: Boolean = false,
+    val heartbeatPulseEnabled: Boolean = false,
     val demoEnabled: Boolean = false,
     val zone: HrZone? = null,
     val lastCommand: String = "none",
@@ -46,6 +47,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val ui: StateFlow<UiState> = _ui.asStateFlow()
     private var demoJob: Job? = null
     private var automationJob: Job? = null
+    private var heartbeatJob: Job? = null
     private var lastSentZone: HrZone? = null
     private var lastCommandAt = 0L
 
@@ -139,6 +141,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (enabled) _ui.value.zone?.let(::queueAutomation)
     }
 
+    fun setHeartbeatPulse(enabled: Boolean) {
+        heartbeatJob?.cancel()
+        heartbeatJob = null
+        _ui.value = _ui.value.copy(heartbeatPulseEnabled = enabled)
+        if (enabled) {
+            heartbeatJob = viewModelScope.launch {
+                while (true) {
+                    val state = _ui.value
+                    val bpm = state.smoothedBpm
+                    if (state.automationEnabled && bpm != null && selectedLights().isNotEmpty()) {
+                        val intervalMs = (60_000L / bpm.coerceIn(40, 200)).coerceAtLeast(500L)
+                        val durationMs = (intervalMs / 3).toInt().coerceIn(120, 220)
+                        wiz.pulse(selectedLights(), delta = -8, durationMs = durationMs)
+                            .onFailure { Log.w(TAG, "Heartbeat pulse skipped: ${it.message}") }
+                        delay(intervalMs)
+                    } else {
+                        delay(500)
+                    }
+                }
+            }
+        }
+    }
+
     fun setDemo(enabled: Boolean) {
         demoJob?.cancel()
         processor.reset()
@@ -186,7 +211,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         address?.let { preferences.getString("light_name_$it", null) } ?: "WiZ Light $number"
     private fun setError(message: String) { Log.e(TAG, message); _ui.value = _ui.value.copy(error = message) }
 
-    override fun onCleared() { polar.close(); super.onCleared() }
+    override fun onCleared() { heartbeatJob?.cancel(); polar.close(); super.onCleared() }
 
     companion object {
         private const val TAG = "PolarWizVM"
