@@ -60,7 +60,7 @@ class WizLanManager(context: Context) {
             lights,
             JSONObject().put("method", "pulse").put(
                 "params",
-                JSONObject().put("delta", delta.coerceIn(-30, -1)).put("duration", durationMs.coerceIn(100, 500))
+                JSONObject().put("delta", delta.coerceIn(-80, -1)).put("duration", durationMs.coerceIn(100, 700))
             )
         )
 

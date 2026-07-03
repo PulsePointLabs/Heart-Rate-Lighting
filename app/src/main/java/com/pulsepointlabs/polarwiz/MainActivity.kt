@@ -9,6 +9,8 @@ import android.widget.TextView
 import android.widget.ArrayAdapter
 import android.widget.AdapterView
 import android.widget.EditText
+import android.widget.Button
+import android.widget.LinearLayout
 import androidx.appcompat.app.AlertDialog
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
@@ -120,18 +122,38 @@ class MainActivity : AppCompatActivity() {
             renderedLights = lightKeys
             wizLightList.removeAllViews()
             state.lights.forEach { light ->
-                wizLightList.addView(CheckBox(this@MainActivity).apply {
+                val address = light.address.hostAddress.orEmpty()
+                val row = LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(0, 4, 0, 10)
+                }
+                row.addView(CheckBox(this@MainActivity).apply {
                     text = "${light.name}  •  ${light.address.hostAddress}  •  ${if (light.online) "Online" else "Offline"}"
                     setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
                     isChecked = light.selected
                     setOnCheckedChangeListener { _, checked ->
-                        viewModel.setLightSelected(light.address.hostAddress ?: return@setOnCheckedChangeListener, checked)
+                        viewModel.setLightSelected(address, checked)
                     }
                     setOnLongClickListener {
-                        showRenameLightDialog(light.address.hostAddress.orEmpty(), light.name)
+                        showRenameLightDialog(address, light.name)
                         true
                     }
                 })
+                row.addView(LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = android.view.Gravity.END
+                    addView(Button(this@MainActivity).apply {
+                        text = "Name"
+                        isAllCaps = false
+                        setOnClickListener { showRenameLightDialog(address, light.name) }
+                    })
+                    addView(Button(this@MainActivity).apply {
+                        text = "Identify"
+                        isAllCaps = false
+                        setOnClickListener { viewModel.identifyLight(address) }
+                    })
+                })
+                wizLightList.addView(row)
             }
         }
     }

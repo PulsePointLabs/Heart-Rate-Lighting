@@ -104,6 +104,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         })
     }
 
+    fun identifyLight(address: String) {
+        val light = _ui.value.lights.firstOrNull { it.address.hostAddress == address }
+            ?: return setError("Light is no longer in the discovered list")
+        viewModelScope.launch {
+            _ui.value = _ui.value.copy(lastCommand = "Identifying ${light.name}…", error = null)
+            repeat(3) { index ->
+                wiz.pulse(listOf(light), delta = -60, durationMs = 500).onFailure {
+                    setError("Could not identify ${light.name}: ${it.message}")
+                    return@launch
+                }
+                if (index < 2) delay(700)
+            }
+            _ui.value = _ui.value.copy(lastCommand = "Identified ${light.name}")
+        }
+    }
+
     fun setLightingTheme(theme: LightingTheme) {
         if (_ui.value.lightingTheme == theme) return
         lastSentZone = null

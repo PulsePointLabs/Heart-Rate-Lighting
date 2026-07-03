@@ -36,6 +36,8 @@ APK output: `C:\PulsePoint-Standalone\polar-wiz-hr\app\build\outputs\apk\debug\a
 
 Choose **Pulse**, **Ocean**, **Ember**, or **Daylight Tint** under Lighting theme. Daylight Tint remains bright at 80–100%, beginning at 5000 K neutral daylight and adding pale lavender, violet, blush, and coral as HR rises. Long-press any discovered light to replace `WiZ Light 1` with a local name such as `Bedroom Lamp`; aliases are stored only on the phone and keyed to the light's IP address.
 
+Every discovered light also has explicit **Name** and **Identify** buttons. Name stores a local alias. Identify sends three deep, half-second brightness dips to that bulb only, making it easy to match an IP/list row to the physical fixture without changing its saved automation color.
+
 Enable **Subtle heartbeat pulse** together with HR automation for a small brightness dip paced from smoothed BPM. It uses WiZ's native local `pulse` operation (`-8%`, roughly 120–220 ms), so the bulb restores itself without a second command. Pulse pacing is capped at two commands per second; normal zone commands remain throttled to one every three seconds.
 
 Connecting the H10 or enabling automation starts a foreground `connectedDevice` service. Its persistent notification keeps the BLE GATT session, zone mapping, and heartbeat pulses running when the screen locks or another app is in front. Explicitly disconnect the H10 and disable automation to stop the service. Android 13+ may ask for notification permission; declining hides the drawer notification but does not prevent the foreground service from running.
