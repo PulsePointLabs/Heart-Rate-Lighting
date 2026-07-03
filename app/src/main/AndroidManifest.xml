@@ -22,7 +22,9 @@
 
     <application
         android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
         android:label="Polar WiZ HR"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.PolarWiz">
         <activity android:name=".MainActivity" android:exported="true">

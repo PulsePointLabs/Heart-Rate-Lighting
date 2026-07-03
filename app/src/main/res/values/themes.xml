@@ -5,5 +5,8 @@
         <item name="android:statusBarColor">@color/navy</item>
         <item name="android:navigationBarColor">@color/navy</item>
         <item name="colorAccent">@color/accent</item>
+        <item name="android:windowBackground">@color/navy</item>
+        <item name="android:colorControlActivated">@color/accent</item>
+        <item name="android:colorControlNormal">@color/text_secondary</item>
     </style>
 </resources>

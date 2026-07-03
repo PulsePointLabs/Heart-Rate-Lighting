@@ -11,6 +11,7 @@ import android.widget.AdapterView
 import android.widget.EditText
 import android.widget.Button
 import android.widget.LinearLayout
+import android.content.res.ColorStateList
 import androidx.appcompat.app.AlertDialog
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
@@ -108,7 +109,12 @@ class MainActivity : AppCompatActivity() {
                     text = "${device.name} • ${device.id} • ${device.rssi} dBm\nTap to connect"
                     setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
                     textSize = 16f
-                    setPadding(12, 16, 12, 16)
+                    background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_list_item)
+                    setPadding(14, 14, 14, 14)
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    ).apply { setMargins(0, 6, 0, 6) }
                     setOnClickListener {
                         requestNotificationPermissionIfNeeded()
                         viewModel.connectPolar(device.id)
@@ -125,11 +131,17 @@ class MainActivity : AppCompatActivity() {
                 val address = light.address.hostAddress.orEmpty()
                 val row = LinearLayout(this@MainActivity).apply {
                     orientation = LinearLayout.VERTICAL
-                    setPadding(0, 4, 0, 10)
+                    background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_list_item)
+                    setPadding(10, 6, 10, 10)
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    ).apply { setMargins(0, 6, 0, 6) }
                 }
                 row.addView(CheckBox(this@MainActivity).apply {
                     text = "${light.name}  •  ${light.address.hostAddress}  •  ${if (light.online) "Online" else "Offline"}"
                     setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+                    buttonTintList = ColorStateList.valueOf(ContextCompat.getColor(this@MainActivity, R.color.accent))
                     isChecked = light.selected
                     setOnCheckedChangeListener { _, checked ->
                         viewModel.setLightSelected(address, checked)
@@ -145,11 +157,15 @@ class MainActivity : AppCompatActivity() {
                     addView(Button(this@MainActivity).apply {
                         text = "Name"
                         isAllCaps = false
+                        backgroundTintList = ColorStateList.valueOf(ContextCompat.getColor(this@MainActivity, R.color.panel_variant))
+                        setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
                         setOnClickListener { showRenameLightDialog(address, light.name) }
                     })
                     addView(Button(this@MainActivity).apply {
                         text = "Identify"
                         isAllCaps = false
+                        backgroundTintList = ColorStateList.valueOf(ContextCompat.getColor(this@MainActivity, R.color.accent))
+                        setTextColor(ContextCompat.getColor(this@MainActivity, R.color.accent_dark))
                         setOnClickListener { viewModel.identifyLight(address) }
                     })
                 })

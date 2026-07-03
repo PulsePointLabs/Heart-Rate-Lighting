@@ -1,11 +1,13 @@
 <resources>
     <style name="SectionTitle">
         <item name="android:layout_width">match_parent</item><item name="android:layout_height">wrap_content</item>
-        <item name="android:layout_marginTop">20dp</item><item name="android:layout_marginBottom">8dp</item>
-        <item name="android:textColor">@color/accent</item><item name="android:textSize">20sp</item><item name="android:textStyle">bold</item>
+        <item name="android:layout_marginBottom">10dp</item>
+        <item name="android:textColor">@color/text_primary</item><item name="android:textSize">20sp</item><item name="android:textStyle">bold</item>
     </style>
-    <style name="BodyText"><item name="android:layout_width">match_parent</item><item name="android:layout_height">wrap_content</item><item name="android:textColor">@color/text_primary</item><item name="android:textSize">16sp</item><item name="android:paddingTop">4dp</item><item name="android:paddingBottom">4dp</item></style>
-    <style name="MetricText" parent="BodyText"><item name="android:textSize">30sp</item><item name="android:textStyle">bold</item></style>
+    <style name="BodyText"><item name="android:layout_width">match_parent</item><item name="android:layout_height">wrap_content</item><item name="android:textColor">@color/text_secondary</item><item name="android:textSize">15sp</item><item name="android:paddingTop">4dp</item><item name="android:paddingBottom">4dp</item></style>
+    <style name="MetricText" parent="BodyText"><item name="android:textColor">@color/heart</item><item name="android:textSize">34sp</item><item name="android:textStyle">bold</item></style>
     <style name="ButtonRow"><item name="android:layout_width">match_parent</item><item name="android:layout_height">wrap_content</item><item name="android:orientation">horizontal</item></style>
-    <style name="ActionButton"><item name="android:layout_width">0dp</item><item name="android:layout_height">wrap_content</item><item name="android:layout_weight">1</item></style>
+    <style name="ActionButton"><item name="android:layout_width">0dp</item><item name="android:layout_height">48dp</item><item name="android:layout_weight">1</item><item name="android:layout_margin">3dp</item><item name="android:backgroundTint">@color/panel_variant</item><item name="android:textColor">@color/text_primary</item><item name="android:textStyle">bold</item></style>
+    <style name="PrimaryButton" parent="ActionButton"><item name="android:backgroundTint">@color/accent</item><item name="android:textColor">@color/accent_dark</item></style>
+    <style name="CardPanel"><item name="android:layout_width">match_parent</item><item name="android:layout_height">wrap_content</item><item name="android:layout_marginTop">12dp</item><item name="android:background">@drawable/bg_card</item><item name="android:orientation">vertical</item><item name="android:padding">16dp</item></style>
 </resources>

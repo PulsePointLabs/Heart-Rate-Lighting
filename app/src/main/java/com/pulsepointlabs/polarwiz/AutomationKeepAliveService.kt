@@ -32,7 +32,7 @@ class AutomationKeepAliveService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_menu_info_details)
+            .setSmallIcon(R.drawable.ic_stat_polar_wiz)
             .setContentTitle("Polar WiZ lighting active")
             .setContentText("H10 and local light automation continue in the background")
             .setContentIntent(openApp)

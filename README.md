@@ -1,5 +1,7 @@
 # Polar H10 → WiZ HR lighting MVP
 
+The interface uses the SarahVS dark visual system: near-black background, layered charcoal cards, lavender controls, rose HR metrics, cyan lighting accents, and a companion heart/ECG/light app icon.
+
 Local-only Android app: Polar H10 BLE heart rate in, WiZ UDP commands out. There is no backend, login, database, cloud API, analytics, or AI integration.
 
 ## Requirements
