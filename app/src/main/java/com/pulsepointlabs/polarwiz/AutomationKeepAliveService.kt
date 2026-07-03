@@ -15,6 +15,7 @@ import androidx.core.app.ServiceCompat
 class AutomationKeepAliveService : Service() {
     override fun onCreate() {
         super.onCreate()
+        (application as PolarWizApplication).runtime
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
             NotificationChannel(CHANNEL_ID, "Heart-rate lighting", NotificationManager.IMPORTANCE_LOW).apply {

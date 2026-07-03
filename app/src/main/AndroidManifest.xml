@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <permission android:name="com.pulsepointlabs.polarwiz.permission.HR_FEED" android:protectionLevel="signature" />
+
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
     <uses-feature android:name="android.hardware.wifi" android:required="true" />
 
@@ -21,6 +23,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
 
     <application
+        android:name=".PolarWizApplication"
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="Polar WiZ HR"
@@ -38,5 +41,13 @@
             android:exported="false"
             android:foregroundServiceType="connectedDevice"
             android:stopWithTask="false" />
+        <receiver
+            android:name=".SarahVsHrReceiver"
+            android:exported="true"
+            android:permission="com.pulsepointlabs.polarwiz.permission.HR_FEED">
+            <intent-filter>
+                <action android:name="com.pulsepointlabs.polarwiz.action.SARAHVS_HR_SAMPLE" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

@@ -5,6 +5,7 @@ import android.net.wifi.WifiManager
 import android.util.Log
 import com.pulsepointlabs.polarwiz.model.Rgb
 import com.pulsepointlabs.polarwiz.model.WizLight
+import com.pulsepointlabs.polarwiz.DiagnosticLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -34,11 +35,18 @@ class WizLanManager(context: Context) {
                         val json = JSONObject(String(packet.data, 0, packet.length))
                         if (json.optString("method") != "getPilot") continue
                         val result = json.optJSONObject("result")
+                        val mac = result?.optString("mac")?.takeIf { it.isNotBlank() }
                         val name = result?.optString("moduleName")?.takeIf { it.isNotBlank() }
-                            ?: result?.optString("mac")?.takeIf { it.isNotBlank() }
+                            ?: mac
                             ?: "WiZ light"
-                        found[packet.address.hostAddress ?: name] = WizLight(packet.address, name)
+                        found[mac ?: packet.address.hostAddress ?: name] = WizLight(
+                            address = packet.address,
+                            deviceId = mac ?: packet.address.hostAddress ?: name,
+                            name = name,
+                            lastSeenMs = System.currentTimeMillis()
+                        )
                         Log.i(TAG, "Discovered $name at ${packet.address.hostAddress}")
+                        DiagnosticLog.add(TAG, "Discovered id=${mac ?: "unknown"} ip=${packet.address.hostAddress}")
                     } catch (_: SocketTimeoutException) { /* continue until deadline */ }
                 }
             }
@@ -60,6 +68,60 @@ class WizLanManager(context: Context) {
         put("dimming", brightness.coerceIn(10, 100))
     }
 
+    suspend fun probe(lights: List<WizLight>): Set<String> = withContext(Dispatchers.IO) {
+        buildSet {
+            lights.forEach { light ->
+                runCatching {
+                    DatagramSocket().use { socket ->
+                        socket.soTimeout = 450
+                        val payload = "{\"method\":\"getPilot\",\"params\":{}}".toByteArray()
+                        socket.send(DatagramPacket(payload, payload.size, light.address, PORT))
+                        val buffer = ByteArray(2048)
+                        val response = DatagramPacket(buffer, buffer.size)
+                        socket.receive(response)
+                        val json = JSONObject(String(response.data, 0, response.length))
+                        if (json.optString("method") == "getPilot") add(light.deviceId)
+                    }
+                }
+            }
+        }
+    }
+
+    suspend fun snapshot(lights: List<WizLight>): Map<String, JSONObject> = withContext(Dispatchers.IO) {
+        buildMap {
+            lights.forEach { light ->
+                queryPilot(light)?.let { result ->
+                    val restorable = JSONObject()
+                    listOf("state", "dimming", "temp", "r", "g", "b", "c", "w", "sceneId", "speed").forEach { key ->
+                        if (result.has(key)) restorable.put(key, result.get(key))
+                    }
+                    put(light.deviceId, restorable)
+                }
+            }
+        }
+    }
+
+    suspend fun restore(lights: List<WizLight>, states: Map<String, JSONObject>): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            lights.forEach { light ->
+                val params = states[light.deviceId] ?: return@forEach
+                sendPayload(listOf(light), JSONObject().put("method", "setPilot").put("params", params)).getOrThrow()
+            }
+        }
+    }
+
+    private fun queryPilot(light: WizLight): JSONObject? = runCatching {
+        DatagramSocket().use { socket ->
+            socket.soTimeout = 500
+            val payload = "{\"method\":\"getPilot\",\"params\":{}}".toByteArray()
+            socket.send(DatagramPacket(payload, payload.size, light.address, PORT))
+            val buffer = ByteArray(2048)
+            val response = DatagramPacket(buffer, buffer.size)
+            socket.receive(response)
+            JSONObject(String(response.data, 0, response.length)).optJSONObject("result")
+        }
+    }.getOrNull()
+
     suspend fun pulse(lights: List<WizLight>, delta: Int = -8, durationMs: Int = 180): Result<Unit> =
         sendPayload(
             lights,
@@ -80,6 +142,7 @@ class WizLanManager(context: Context) {
                 lights.forEach { light ->
                     socket.send(DatagramPacket(payload, payload.size, light.address, PORT))
                     Log.i(TAG, "Command ${String(payload)} -> ${light.address.hostAddress}")
+                    DiagnosticLog.add(TAG, "${message.optString("method")} -> ${light.name} ${light.address.hostAddress}")
                 }
             }
         }

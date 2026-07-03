@@ -46,6 +46,18 @@ The brightness slider is also an automation-wide override. Once adjusted, its va
 
 Releasing the brightness slider immediately sends a brightness-only command to every selected light, preserving its current color. The app also persists light IPs, friendly names, selections, lighting theme, brightness override, automation switches, and the last H10 Bluetooth address. On launch it restores saved lights immediately, refreshes LAN discovery, and reconnects the H10 when Bluetooth permission is already available.
 
+## v0.2 reliability and control
+
+- The application-owned runtime, rather than the Activity, owns BLE, WiZ automation, health checks, and background jobs.
+- WiZ lights use their MAC as stable identity while DHCP IP addresses remain replaceable connection details.
+- Saved lights are probed every 30 seconds for real online/offline status.
+- Each light can be assigned a room/group; the group selector limits manual and automated commands.
+- Pause/resume freezes automation without disconnecting devices.
+- Disabling automation restores the captured pre-automation WiZ state when the bulbs reported it.
+- Heartbeat pulses prefer live RR timing over BPM-derived timing.
+- Diagnostics exports a local, bounded event/command log through Android's share sheet.
+- A signature-protected explicit broadcast accepts live HR/RR from SarahVS. Shared HR takes priority and releases this app's H10 connection; direct H10 automatically returns when the SarahVS feed goes stale.
+
 Enable **Subtle heartbeat pulse** together with HR automation for a small brightness dip paced from smoothed BPM. It uses WiZ's native local `pulse` operation (`-8%`, roughly 120–220 ms), so the bulb restores itself without a second command. Pulse pacing is capped at two commands per second; normal zone commands remain throttled to one every three seconds.
 
 Connecting the H10 or enabling automation starts a foreground `connectedDevice` service. Its persistent notification keeps the BLE GATT session, zone mapping, and heartbeat pulses running when the screen locks or another app is in front. Explicitly disconnect the H10 and disable automation to stop the service. Android 13+ may ask for notification permission; declining hides the drawer notification but does not prevent the foreground service from running.

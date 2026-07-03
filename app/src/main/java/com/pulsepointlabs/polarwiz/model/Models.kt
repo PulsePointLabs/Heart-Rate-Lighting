@@ -5,9 +5,12 @@ import java.net.InetAddress
 data class PolarDevice(val id: String, val name: String, val rssi: Int)
 data class WizLight(
     val address: InetAddress,
+    val deviceId: String = address.hostAddress ?: "unknown",
     val name: String = address.hostAddress ?: "WiZ light",
     val online: Boolean = true,
-    val selected: Boolean = true
+    val selected: Boolean = true,
+    val group: String = "All lights",
+    val lastSeenMs: Long = System.currentTimeMillis()
 )
 
 data class Rgb(val r: Int, val g: Int, val b: Int)

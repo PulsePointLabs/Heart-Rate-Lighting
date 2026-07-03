@@ -23,6 +23,7 @@ import android.os.ParcelUuid
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.pulsepointlabs.polarwiz.model.PolarDevice
+import com.pulsepointlabs.polarwiz.DiagnosticLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -73,11 +74,13 @@ class PolarH10Manager(context: Context, private val scope: CoroutineScope) {
                     reconnectAttempts = 0
                     connectionState.value = "Connected; discovering heart-rate service…"
                     Log.i(TAG, "GATT connected status=$status address=${target.device.address}")
+                    DiagnosticLog.add(TAG, "GATT connected status=$status address=${target.device.address}")
                     if (!safeGatt("service discovery") { target.discoverServices() }) disconnectGatt(target)
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     val address = target.device.address
                     Log.w(TAG, "GATT disconnected status=$status address=$address")
+                    DiagnosticLog.add(TAG, "GATT disconnected status=$status address=$address")
                     disconnectGatt(target)
                     connectionState.value = if (status == BluetoothGatt.GATT_SUCCESS) "Disconnected" else "Connection lost (status $status)"
                     if (!intentionalDisconnect && reconnectAddress == address) scheduleReconnect()
@@ -242,6 +245,7 @@ class PolarH10Manager(context: Context, private val scope: CoroutineScope) {
 
     private fun fail(message: String) {
         Log.e(TAG, message)
+        DiagnosticLog.add(TAG, message)
         connectionState.value = message
         errors.tryEmit(message)
     }

@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Build
+import android.content.Intent
 import android.widget.CheckBox
 import android.widget.TextView
 import android.widget.ArrayAdapter
@@ -71,6 +72,11 @@ class MainActivity : AppCompatActivity() {
             }
         })
         binding.themeBrightnessButton.setOnClickListener { viewModel.clearAutomationBrightness() }
+        binding.groupFilterButton.setOnClickListener { showGroupPicker() }
+        binding.pauseAutomationButton.setOnClickListener {
+            viewModel.setAutomationPaused(!viewModel.ui.value.automationPaused)
+        }
+        binding.shareDiagnosticsButton.setOnClickListener { shareDiagnostics() }
         binding.themeSpinner.adapter = ArrayAdapter(
             this,
             R.layout.spinner_theme_item,
@@ -105,6 +111,8 @@ class MainActivity : AppCompatActivity() {
         zoneText.text = "Zone: ${state.zone?.label ?: "--"}"
         lastCommandText.text = "Last command: ${state.lastCommand}"
         errorText.text = state.error.orEmpty()
+        groupFilterButton.text = "Control group: ${state.activeGroup}"
+        pauseAutomationButton.text = if (state.automationPaused) "Resume" else "Pause"
         if (demoSwitch.isChecked != state.demoEnabled) demoSwitch.isChecked = state.demoEnabled
         if (automationSwitch.isChecked != state.automationEnabled) automationSwitch.isChecked = state.automationEnabled
         if (heartbeatPulseSwitch.isChecked != state.heartbeatPulseEnabled) heartbeatPulseSwitch.isChecked = state.heartbeatPulseEnabled
@@ -157,7 +165,8 @@ class MainActivity : AppCompatActivity() {
                     ).apply { setMargins(0, 6, 0, 6) }
                 }
                 row.addView(CheckBox(this@MainActivity).apply {
-                    text = "${light.name}\n${light.address.hostAddress}  •  ${if (light.online) "Online" else "Offline"}"
+                    val groupSuffix = light.group.takeIf { it != "All lights" }?.let { "  •  $it" }.orEmpty()
+                    text = "${light.name}\n${light.address.hostAddress}  •  ${if (light.online) "Online" else "Offline"}$groupSuffix"
                     setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
                     buttonTintList = ColorStateList.valueOf(ContextCompat.getColor(this@MainActivity, R.color.accent))
                     textSize = 15f
@@ -169,18 +178,18 @@ class MainActivity : AppCompatActivity() {
                         viewModel.setLightSelected(address, checked)
                     }
                     setOnLongClickListener {
-                        showRenameLightDialog(address, light.name)
+                        showEditLightDialog(address, light.name, light.group)
                         true
                     }
                 })
                 row.addView(ImageButton(this@MainActivity).apply {
                     setImageResource(R.drawable.ic_edit)
                     background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_icon_button)
-                    contentDescription = "Rename ${light.name}"
+                    contentDescription = "Edit ${light.name} name and group"
                     tooltipText = "Rename light"
                     setPadding(11, 11, 11, 11)
                     layoutParams = LinearLayout.LayoutParams(dp(44), dp(44)).apply { setMargins(dp(4), 0, dp(4), 0) }
-                    setOnClickListener { showRenameLightDialog(address, light.name) }
+                    setOnClickListener { showEditLightDialog(address, light.name, light.group) }
                 })
                 row.addView(ImageButton(this@MainActivity).apply {
                     setImageResource(R.drawable.ic_identify)
@@ -207,14 +216,44 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun showRenameLightDialog(address: String, currentName: String) {
-        val input = EditText(this).apply { setText(currentName); selectAll() }
+    private fun showEditLightDialog(address: String, currentName: String, currentGroup: String) {
+        val nameInput = EditText(this).apply { hint = "Light name"; setText(currentName); selectAll() }
+        val groupInput = EditText(this).apply { hint = "Room or group"; setText(currentGroup) }
+        val fields = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), 0, dp(20), 0)
+            addView(nameInput)
+            addView(groupInput)
+        }
         AlertDialog.Builder(this)
-            .setTitle("Name this WiZ light")
+            .setTitle("Edit WiZ light")
             .setMessage(address)
-            .setView(input)
-            .setPositiveButton("Save") { _, _ -> viewModel.renameLight(address, input.text.toString()) }
+            .setView(fields)
+            .setPositiveButton("Save") { _, _ ->
+                viewModel.updateLightDetails(address, nameInput.text.toString(), groupInput.text.toString())
+            }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    private fun showGroupPicker() {
+        val state = viewModel.ui.value
+        val groups = (listOf("All lights") + state.lights.map { it.group }.filter { it.isNotBlank() }).distinct().toTypedArray()
+        val checked = groups.indexOf(state.activeGroup).coerceAtLeast(0)
+        AlertDialog.Builder(this)
+            .setTitle("Control group")
+            .setSingleChoiceItems(groups, checked) { dialog, which ->
+                viewModel.setActiveGroup(groups[which])
+                dialog.dismiss()
+            }
+            .show()
+    }
+
+    private fun shareDiagnostics() {
+        startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "Polar WiZ HR diagnostics")
+            putExtra(Intent.EXTRA_TEXT, DiagnosticLog.export())
+        }, "Share diagnostics"))
     }
 }

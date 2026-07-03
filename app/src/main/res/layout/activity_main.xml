@@ -46,6 +46,8 @@
                 <Button android:id="@+id/addIpButton" style="@style/ActionButton" android:text="Add IP" />
             </LinearLayout>
             <TextView android:id="@+id/wizStatusText" style="@style/BodyText" android:text="No lights discovered" />
+            <Button android:id="@+id/groupFilterButton" style="@style/CompactButton"
+                android:layout_width="match_parent" android:text="Control group: All lights" />
             <LinearLayout android:id="@+id/wizLightList" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" />
             <LinearLayout style="@style/ButtonRow" android:gravity="center_vertical">
                 <TextView android:id="@+id/brightnessLabel" style="@style/BodyText" android:layout_width="0dp" android:layout_weight="1" android:text="Brightness: theme default" />
@@ -74,6 +76,10 @@
             <TextView android:id="@+id/zoneText" style="@style/MetricText" android:text="Zone: --" />
             <TextView android:id="@+id/lastCommandText" style="@style/BodyText" android:text="Last command: none" android:maxLines="3" android:ellipsize="end" />
             <TextView android:id="@+id/errorText" style="@style/BodyText" android:textColor="#FFFCA5A5" android:maxLines="3" android:ellipsize="end" />
+            <LinearLayout style="@style/ButtonRow">
+                <Button android:id="@+id/pauseAutomationButton" style="@style/ActionButton" android:text="Pause" />
+                <Button android:id="@+id/shareDiagnosticsButton" style="@style/ActionButton" android:text="Diagnostics" />
+            </LinearLayout>
         </LinearLayout>
     </LinearLayout>
 </ScrollView>
