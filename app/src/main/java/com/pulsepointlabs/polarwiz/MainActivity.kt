@@ -3,6 +3,7 @@ package com.pulsepointlabs.polarwiz
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.os.Build
 import android.widget.CheckBox
 import android.widget.TextView
 import android.widget.ArrayAdapter
@@ -33,6 +34,9 @@ class MainActivity : AppCompatActivity() {
         if (grants.values.all { it }) viewModel.scanPolar()
         else binding.errorText.text = "Bluetooth Nearby Devices permission was denied"
     }
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { /* The foreground service still runs if notification permission is declined. */ }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -44,7 +48,10 @@ class MainActivity : AppCompatActivity() {
         binding.discoverWizButton.setOnClickListener { viewModel.discoverLights() }
         binding.addIpButton.setOnClickListener { viewModel.addLightByIp(binding.manualIpText.text.toString()) }
         binding.demoSwitch.setOnCheckedChangeListener { _, checked -> viewModel.setDemo(checked) }
-        binding.automationSwitch.setOnCheckedChangeListener { _, checked -> viewModel.setAutomation(checked) }
+        binding.automationSwitch.setOnCheckedChangeListener { _, checked ->
+            if (checked) requestNotificationPermissionIfNeeded()
+            viewModel.setAutomation(checked)
+        }
         binding.heartbeatPulseSwitch.setOnCheckedChangeListener { _, checked -> viewModel.setHeartbeatPulse(checked) }
         binding.warmButton.setOnClickListener { viewModel.manualColor(null, brightness(), 2700) }
         binding.violetButton.setOnClickListener { viewModel.manualColor(Rgb(135, 50, 255), brightness()) }
@@ -100,7 +107,10 @@ class MainActivity : AppCompatActivity() {
                     setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
                     textSize = 16f
                     setPadding(12, 16, 12, 16)
-                    setOnClickListener { viewModel.connectPolar(device.id) }
+                    setOnClickListener {
+                        requestNotificationPermissionIfNeeded()
+                        viewModel.connectPolar(device.id)
+                    }
                 })
             }
         }
@@ -127,6 +137,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun brightness() = binding.brightnessSeek.progress.coerceAtLeast(10)
+
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
 
     private fun showRenameLightDialog(address: String, currentName: String) {
         val input = EditText(this).apply { setText(currentName); selectAll() }

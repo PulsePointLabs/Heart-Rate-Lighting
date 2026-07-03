@@ -2,6 +2,8 @@ package com.pulsepointlabs.polarwiz
 
 import android.app.Application
 import android.util.Log
+import android.content.Intent
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.pulsepointlabs.polarwiz.ble.PolarH10Manager
@@ -50,6 +52,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var heartbeatJob: Job? = null
     private var lastSentZone: HrZone? = null
     private var lastCommandAt = 0L
+    private var polarSessionActive = false
 
     init {
         viewModelScope.launch { polar.devices.collect { _ui.value = _ui.value.copy(polarDevices = it) } }
@@ -59,8 +62,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun scanPolar() = polar.scan()
-    fun connectPolar(id: String) = polar.connect(id)
-    fun disconnectPolar() = polar.disconnect()
+    fun connectPolar(id: String) {
+        polarSessionActive = true
+        updateBackgroundService()
+        polar.connect(id)
+    }
+    fun disconnectPolar() {
+        polarSessionActive = false
+        polar.disconnect()
+        updateBackgroundService()
+    }
 
     fun discoverLights() {
         viewModelScope.launch {
@@ -138,6 +149,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setAutomation(enabled: Boolean) {
         lastSentZone = null
         _ui.value = _ui.value.copy(automationEnabled = enabled)
+        updateBackgroundService()
         if (enabled) _ui.value.zone?.let(::queueAutomation)
     }
 
@@ -211,7 +223,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         address?.let { preferences.getString("light_name_$it", null) } ?: "WiZ Light $number"
     private fun setError(message: String) { Log.e(TAG, message); _ui.value = _ui.value.copy(error = message) }
 
-    override fun onCleared() { heartbeatJob?.cancel(); polar.close(); super.onCleared() }
+    private fun updateBackgroundService() {
+        val context = getApplication<Application>()
+        runCatching {
+            val intent = Intent(context, AutomationKeepAliveService::class.java)
+            if (polarSessionActive || _ui.value.automationEnabled) {
+                ContextCompat.startForegroundService(context, intent)
+            } else {
+                context.stopService(intent)
+            }
+        }.onFailure { setError("Background service failed: ${it.message}") }
+    }
+
+    override fun onCleared() {
+        heartbeatJob?.cancel()
+        polar.close()
+        getApplication<Application>().stopService(Intent(getApplication(), AutomationKeepAliveService::class.java))
+        super.onCleared()
+    }
 
     companion object {
         private const val TAG = "PolarWizVM"
