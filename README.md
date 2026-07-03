@@ -4,6 +4,8 @@ The interface uses the SarahVS dark visual system: near-black background, layere
 
 Local-only Android app: Polar H10 BLE heart rate in, WiZ UDP commands out. There is no backend, login, database, cloud API, analytics, or AI integration.
 
+Philips Hue Bridge bulbs are also supported over the bridge's local HTTPS API. Enter the bridge IP, press its physical link button, and tap **Pair** once. The generated bridge credential remains in Android private preferences; no Hue cloud account is used. Selected Hue bulbs participate in manual colors, brightness/off commands, HR themes, and sleep/wake state restoration. WiZ native heartbeat pulses remain WiZ-only because Hue's REST API is not intended for rapid continuous effects.
+
 ## Requirements
 
 - Android 13 or newer (API 33; this is the current Polar BLE SDK minimum)

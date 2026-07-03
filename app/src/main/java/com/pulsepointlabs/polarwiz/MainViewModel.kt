@@ -11,6 +11,8 @@ import com.pulsepointlabs.polarwiz.model.HrZone
 import com.pulsepointlabs.polarwiz.model.PolarDevice
 import com.pulsepointlabs.polarwiz.model.Rgb
 import com.pulsepointlabs.polarwiz.model.WizLight
+import com.pulsepointlabs.polarwiz.model.HueLight
+import com.pulsepointlabs.polarwiz.hue.HueBridgeManager
 import com.pulsepointlabs.polarwiz.model.LightingTheme
 import com.pulsepointlabs.polarwiz.wiz.WizLanManager
 import com.pulsepointlabs.polarwiz.sleep.SleepWakeDetector
@@ -38,6 +40,9 @@ data class UiState(
     val rrMs: Int? = null,
     val wizStatus: String = "No lights discovered",
     val lights: List<WizLight> = emptyList(),
+    val hueBridgeIp: String = "192.168.0.15",
+    val hueStatus: String = "Hue Bridge not paired",
+    val hueLights: List<HueLight> = emptyList(),
     val lightingTheme: LightingTheme = LightingTheme.PULSE,
     val brightnessOverride: Int? = null,
     val automationEnabled: Boolean = false,
@@ -67,6 +72,7 @@ class LightingRuntime(private val application: Application) {
         UiState(
             wizStatus = if (restoredLights.isEmpty()) "No lights discovered" else "Restored ${restoredLights.size} saved light(s)",
             lights = restoredLights,
+            hueBridgeIp = preferences.getString("hue_bridge_ip", "192.168.0.15") ?: "192.168.0.15",
             lightingTheme = runCatching {
                 LightingTheme.valueOf(preferences.getString("lighting_theme", LightingTheme.PULSE.name)!!)
             }.getOrDefault(LightingTheme.PULSE),
@@ -93,6 +99,9 @@ class LightingRuntime(private val application: Application) {
     @Volatile private var lastSarahVsSampleAt = 0L
     private var previousLightStates: Map<String, JSONObject> = emptyMap()
     private var preSleepLightStates: Map<String, JSONObject> = emptyMap()
+    private var preSleepHueStates: Map<String, JSONObject> = emptyMap()
+    private val hue = HueBridgeManager()
+    private val hueKey get() = preferences.getString("hue_key", null)
     private val sleepDetector = SleepWakeDetector()
     private val sleepMonitor = SleepWakeMonitor(application, ::acceptMotion, ::acceptSignificantMotion)
 
@@ -114,6 +123,7 @@ class LightingRuntime(private val application: Application) {
             connectPolar(address)
         }
         if (restoredLights.isNotEmpty()) discoverLights(silentRefresh = true)
+        if (hueKey != null) refreshHueLights()
         healthJob = scope.launch {
             while (true) {
                 delay(30_000)
@@ -195,6 +205,35 @@ class LightingRuntime(private val application: Application) {
         persistLights()
     }
 
+    fun pairHueBridge(rawIp: String) {
+        val ip = rawIp.trim()
+        if (!IPV4.matches(ip)) return setError("Enter the Hue Bridge IPv4 address")
+        scope.launch {
+            _ui.value = _ui.value.copy(hueBridgeIp = ip, hueStatus = "Pairing — press the bridge button…", error = null)
+            hue.pair(ip).fold(onSuccess = { key ->
+                preferences.edit().putString("hue_bridge_ip", ip).putString("hue_key", key).apply()
+                _ui.value = _ui.value.copy(hueStatus = "Hue Bridge paired")
+                refreshHueLights()
+            }, onFailure = { setError("Hue pairing failed: ${it.message}") })
+        }
+    }
+
+    fun refreshHueLights() {
+        val key = hueKey ?: return
+        val ip = _ui.value.hueBridgeIp
+        val selected = preferences.getStringSet("hue_selected", emptySet()).orEmpty()
+        scope.launch { hue.lights(ip, key).fold(onSuccess = { found ->
+            val firstLoad = selected.isEmpty()
+            _ui.value = _ui.value.copy(hueLights = found.map { it.copy(selected = firstLoad || it.id in selected) }, hueStatus = "${found.size} Hue light(s) connected", error = null)
+        }, onFailure = { setError("Hue Bridge failed: ${it.message}") }) }
+    }
+
+    fun setHueLightSelected(id: String, selected: Boolean) {
+        val lights = _ui.value.hueLights.map { if (it.id == id) it.copy(selected = selected) else it }
+        _ui.value = _ui.value.copy(hueLights = lights)
+        preferences.edit().putStringSet("hue_selected", lights.filter { it.selected }.map { it.id }.toSet()).apply()
+    }
+
     fun renameLight(address: String, requestedName: String) {
         val name = requestedName.trim().take(40)
         if (name.isBlank()) return
@@ -273,10 +312,13 @@ class LightingRuntime(private val application: Application) {
         _ui.value = _ui.value.copy(brightnessOverride = value)
         lastSentZone = null
         scope.launch {
-            wiz.setBrightness(selectedLights(), value).fold(
+            selectedLights().takeIf { it.isNotEmpty() }?.let { wiz.setBrightness(it, value).fold(
                 onSuccess = { _ui.value = _ui.value.copy(lastCommand = "Brightness set to $value%", error = null) },
                 onFailure = { setError("Brightness command failed: ${it.message}") }
-            )
+            ) }
+            hueCredentials()?.takeIf { selectedHueLights().isNotEmpty() }?.let { (ip, key) ->
+                hue.setBrightness(ip, key, selectedHueLights(), value).onFailure { setError("Hue brightness failed: ${it.message}") }
+            }
         }
     }
 
@@ -312,19 +354,31 @@ class LightingRuntime(private val application: Application) {
     fun manualColor(color: Rgb?, brightness: Int, temperature: Int? = null) {
         scope.launch {
             val selected = selectedLights()
-            wiz.setColor(selected, color, brightness, temperature).fold(
+            selected.takeIf { it.isNotEmpty() }?.let { wiz.setColor(it, color, brightness, temperature).fold(
                 onSuccess = { _ui.value = _ui.value.copy(lastCommand = "Manual color at $brightness%", error = null) },
                 onFailure = { setError("WiZ command failed: ${it.message}") }
-            )
+            ) }
+            hueCredentials()?.takeIf { selectedHueLights().isNotEmpty() }?.let { (ip, key) ->
+                hue.setColor(ip, key, selectedHueLights(), color, brightness, temperature).fold(
+                    onSuccess = { _ui.value = _ui.value.copy(lastCommand = "Manual color at $brightness%", error = null) },
+                    onFailure = { setError("Hue command failed: ${it.message}") }
+                )
+            }
         }
     }
 
     fun turnOff() {
         scope.launch {
-            wiz.turnOff(selectedLights()).fold(
+            selectedLights().takeIf { it.isNotEmpty() }?.let { wiz.turnOff(it).fold(
                 onSuccess = { _ui.value = _ui.value.copy(lastCommand = "Lights off", error = null) },
                 onFailure = { setError("WiZ command failed: ${it.message}") }
-            )
+            ) }
+            hueCredentials()?.takeIf { selectedHueLights().isNotEmpty() }?.let { (ip, key) ->
+                hue.turnOff(ip, key, selectedHueLights()).fold(
+                    onSuccess = { _ui.value = _ui.value.copy(lastCommand = "Lights off", error = null) },
+                    onFailure = { setError("Hue command failed: ${it.message}") }
+                )
+            }
         }
     }
 
@@ -425,7 +479,10 @@ class LightingRuntime(private val application: Application) {
         sleepEvaluationJob = null
         sleepMonitor.stop()
         sleepDetector.reset()
-        if (clearSnapshot) preSleepLightStates = emptyMap()
+        if (clearSnapshot) {
+            preSleepLightStates = emptyMap()
+            preSleepHueStates = emptyMap()
+        }
     }
 
     private fun acceptMotion(acceleration: Float) {
@@ -441,23 +498,31 @@ class LightingRuntime(private val application: Application) {
             SleepWakeDetector.Event.SLEEP -> scope.launch {
                 val lights = selectedLights()
                 preSleepLightStates = wiz.snapshot(lights)
-                wiz.turnOff(lights).fold(
+                hueCredentials()?.let { (ip, key) -> preSleepHueStates = hue.snapshot(ip, key, selectedHueLights()) }
+                if (lights.isNotEmpty()) wiz.turnOff(lights).fold(
                     onSuccess = {
                         _ui.value = _ui.value.copy(sleepStatus = "Sleeping — lights off", lastCommand = "Sleep detected: lights off", error = null)
                         DiagnosticLog.add(TAG, "Sleep detected; captured ${preSleepLightStates.size} light states and turned lights off")
                     },
                     onFailure = { setError("Sleep lights-off failed: ${it.message}") }
                 )
+                hueCredentials()?.takeIf { selectedHueLights().isNotEmpty() }?.let { (ip, key) ->
+                    hue.turnOff(ip, key, selectedHueLights()).onFailure { setError("Hue sleep lights-off failed: ${it.message}") }
+                }
+                if (lights.isEmpty() && selectedHueLights().isNotEmpty()) _ui.value = _ui.value.copy(sleepStatus = "Sleeping — lights off", lastCommand = "Sleep detected: lights off", error = null)
             }
             SleepWakeDetector.Event.WAKE -> scope.launch {
                 val state = _ui.value
+                val wizLights = selectedLights()
                 val result = if (state.restoreLightsOnWake && preSleepLightStates.isNotEmpty()) {
                     wiz.restore(state.lights, preSleepLightStates)
+                } else if (wizLights.isEmpty()) {
+                    Result.success(Unit)
                 } else {
                     val brightness = state.brightnessOverride
                         ?: state.zone?.let { state.lightingTheme.styleFor(it).brightness }
                         ?: 60
-                    wiz.setBrightness(selectedLights(), brightness)
+                    wiz.setBrightness(wizLights, brightness)
                 }
                 result.fold(
                     onSuccess = {
@@ -472,6 +537,15 @@ class LightingRuntime(private val application: Application) {
                     },
                     onFailure = { setError("Wake light restore failed: ${it.message}") }
                 )
+                hueCredentials()?.let { (ip, key) ->
+                    val hueResult = if (state.restoreLightsOnWake && preSleepHueStates.isNotEmpty()) hue.restore(ip, key, preSleepHueStates)
+                    else {
+                        val brightness = state.brightnessOverride ?: state.zone?.let { state.lightingTheme.styleFor(it).brightness } ?: 60
+                        hue.setBrightness(ip, key, selectedHueLights(), brightness)
+                    }
+                    hueResult.onFailure { setError("Hue wake restore failed: ${it.message}") }
+                    preSleepHueStates = emptyMap()
+                }
             }
             null -> Unit
         }
@@ -522,20 +596,31 @@ class LightingRuntime(private val application: Application) {
             if (!_ui.value.automationEnabled || _ui.value.automationPaused || sleepDetector.state == SleepWakeDetector.State.SLEEPING || _ui.value.zone != zone || lastSentZone == zone) return@launch
             val style = _ui.value.lightingTheme.styleFor(zone)
             val brightness = _ui.value.brightnessOverride ?: style.brightness
-            wiz.setColor(selectedLights(), style.color, brightness, style.temperature).fold(
-                onSuccess = {
+            var succeeded = false
+            val wizLights = selectedLights()
+            if (wizLights.isNotEmpty()) wiz.setColor(wizLights, style.color, brightness, style.temperature).fold(
+                onSuccess = { succeeded = true },
+                onFailure = { setError("Automation command failed: ${it.message}") }
+            )
+            hueCredentials()?.takeIf { selectedHueLights().isNotEmpty() }?.let { (ip, key) ->
+                hue.setColor(ip, key, selectedHueLights(), style.color, brightness, style.temperature).fold(
+                    onSuccess = { succeeded = true },
+                    onFailure = { setError("Hue automation failed: ${it.message}") }
+                )
+            }
+            if (succeeded) {
                     lastSentZone = zone
                     lastCommandAt = System.currentTimeMillis()
                     _ui.value = _ui.value.copy(lastCommand = "${_ui.value.lightingTheme.displayName}: ${zone.label}, $brightness%", error = null)
-                },
-                onFailure = { setError("Automation command failed: ${it.message}") }
-            )
+            }
         }
     }
 
     private fun selectedLights() = _ui.value.lights.filter {
         it.selected && it.online && (_ui.value.activeGroup == "All lights" || it.group == _ui.value.activeGroup)
     }
+    private fun selectedHueLights() = _ui.value.hueLights.filter { it.selected && it.online }
+    private fun hueCredentials() = hueKey?.let { _ui.value.hueBridgeIp to it }
     private fun savedLightName(identity: String?, legacyAddress: String?, number: Int): String =
         identity?.let { preferences.getString("light_name_$it", null) }
             ?: legacyAddress?.let { preferences.getString("light_name_$it", null) }
@@ -634,6 +719,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun disconnectPolar() = runtime.disconnectPolar()
     fun discoverLights() = runtime.discoverLights()
     fun setLightSelected(address: String, selected: Boolean) = runtime.setLightSelected(address, selected)
+    fun pairHueBridge(ip: String) = runtime.pairHueBridge(ip)
+    fun refreshHueLights() = runtime.refreshHueLights()
+    fun setHueLightSelected(id: String, selected: Boolean) = runtime.setHueLightSelected(id, selected)
     fun renameLight(address: String, name: String) = runtime.renameLight(address, name)
     fun assignLightGroup(address: String, group: String) = runtime.assignLightGroup(address, group)
     fun createGroup(name: String) = runtime.createGroup(name)

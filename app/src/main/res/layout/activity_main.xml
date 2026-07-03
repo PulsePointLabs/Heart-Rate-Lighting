@@ -20,6 +20,20 @@
         </LinearLayout>
 
         <LinearLayout style="@style/CardPanel">
+            <TextView style="@style/SectionTitle" android:text="◉  Philips Hue" android:textColor="@color/accent" />
+            <TextView style="@style/BodyText" android:text="Press the physical bridge button, then tap Pair." />
+            <LinearLayout style="@style/ButtonRow">
+                <EditText android:id="@+id/hueBridgeIpText" android:layout_width="0dp" android:layout_height="48dp"
+                    android:layout_weight="2" android:hint="Hue Bridge IP" android:inputType="text"
+                    android:textColor="@color/text_primary" android:textColorHint="@color/text_secondary" android:backgroundTint="@color/outline" />
+                <Button android:id="@+id/pairHueButton" style="@style/PrimaryButton" android:text="Pair" />
+                <Button android:id="@+id/refreshHueButton" style="@style/ActionButton" android:text="Refresh" />
+            </LinearLayout>
+            <TextView android:id="@+id/hueStatusText" style="@style/BodyText" android:text="Hue Bridge not paired" />
+            <LinearLayout android:id="@+id/hueLightList" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" />
+        </LinearLayout>
+
+        <LinearLayout style="@style/CardPanel">
             <TextView style="@style/SectionTitle" android:text="♥  Polar H10" android:textColor="@color/heart" />
             <LinearLayout style="@style/ButtonRow">
                 <Button android:id="@+id/scanPolarButton" style="@style/PrimaryButton" android:text="Scan" />

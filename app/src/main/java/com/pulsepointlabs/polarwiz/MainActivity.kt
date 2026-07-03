@@ -32,6 +32,7 @@ class MainActivity : AppCompatActivity() {
     private val viewModel: MainViewModel by viewModels()
     private var renderedPolarIds = emptyList<String>()
     private var renderedLights = emptyList<String>()
+    private var renderedHueLights = emptyList<String>()
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -52,6 +53,8 @@ class MainActivity : AppCompatActivity() {
         binding.disconnectPolarButton.setOnClickListener { viewModel.disconnectPolar() }
         binding.discoverWizButton.setOnClickListener { viewModel.discoverLights() }
         binding.addIpButton.setOnClickListener { viewModel.addLightByIp(binding.manualIpText.text.toString()) }
+        binding.pairHueButton.setOnClickListener { viewModel.pairHueBridge(binding.hueBridgeIpText.text.toString()) }
+        binding.refreshHueButton.setOnClickListener { viewModel.refreshHueLights() }
         binding.demoSwitch.setOnCheckedChangeListener { _, checked -> viewModel.setDemo(checked) }
         binding.automationSwitch.setOnCheckedChangeListener { _, checked ->
             if (checked) requestNotificationPermissionIfNeeded()
@@ -122,6 +125,8 @@ class MainActivity : AppCompatActivity() {
         bpmText.text = state.bpm?.let { "$it BPM" } ?: "-- BPM"
         smoothedBpmText.text = "Smoothed: ${state.smoothedBpm ?: "--"}   RR: ${state.rrMs?.let { "$it ms" } ?: "--"}"
         wizStatusText.text = state.wizStatus
+        hueStatusText.text = state.hueStatus
+        if (!hueBridgeIpText.hasFocus() && hueBridgeIpText.text.toString() != state.hueBridgeIp) hueBridgeIpText.setText(state.hueBridgeIp)
         zoneText.text = "Zone: ${state.zone?.label ?: "--"}"
         lastCommandText.text = "Last command: ${state.lastCommand}"
         errorText.text = state.error.orEmpty()
@@ -232,6 +237,23 @@ class MainActivity : AppCompatActivity() {
                     setOnClickListener { viewModel.identifyLight(address) }
                 })
                 wizLightList.addView(row)
+            }
+        }
+        val hueKeys = state.hueLights.map { "${it.id}|${it.selected}|${it.name}|${it.online}" }
+        if (hueKeys != renderedHueLights) {
+            renderedHueLights = hueKeys
+            hueLightList.removeAllViews()
+            state.hueLights.forEach { light ->
+                hueLightList.addView(CheckBox(this@MainActivity).apply {
+                    text = "${light.name}  •  ${if (light.online) "Online" else "Offline"}"
+                    setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+                    buttonTintList = ColorStateList.valueOf(ContextCompat.getColor(this@MainActivity, R.color.accent))
+                    textSize = 15f; isChecked = light.selected
+                    background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_list_item)
+                    setPadding(dp(10), dp(8), dp(10), dp(8))
+                    layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { setMargins(0, dp(4), 0, dp(4)) }
+                    setOnCheckedChangeListener { _, checked -> viewModel.setHueLightSelected(light.id, checked) }
+                })
             }
         }
     }

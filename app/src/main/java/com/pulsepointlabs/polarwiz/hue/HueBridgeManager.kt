@@ -1,0 +1,80 @@
+package com.pulsepointlabs.polarwiz.hue
+
+import com.pulsepointlabs.polarwiz.model.HueLight
+import com.pulsepointlabs.polarwiz.model.Rgb
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
+import java.net.URL
+import java.security.SecureRandom
+import java.security.cert.X509Certificate
+import javax.net.ssl.HostnameVerifier
+import javax.net.ssl.HttpsURLConnection
+import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManager
+import javax.net.ssl.X509TrustManager
+import kotlin.math.pow
+
+class HueBridgeManager {
+    suspend fun pair(ip: String): Result<String> = withContext(Dispatchers.IO) { runCatching {
+        val response = JSONArray(request(ip, "/api", "POST", JSONObject().put("devicetype", "polar_wiz_hr#android")))
+        response.optJSONObject(0)?.optJSONObject("success")?.optString("username")
+            ?.takeIf { it.isNotBlank() }
+            ?: throw IllegalStateException(response.optJSONObject(0)?.optJSONObject("error")?.optString("description") ?: "Press the bridge button and try again")
+    } }
+
+    suspend fun lights(ip: String, key: String): Result<List<HueLight>> = withContext(Dispatchers.IO) { runCatching {
+        val json = JSONObject(request(ip, "/api/$key/lights"))
+        json.keys().asSequence().map { id ->
+            val item = json.getJSONObject(id)
+            HueLight(id, item.optString("name", "Hue light $id"), online = item.optJSONObject("state")?.optBoolean("reachable", true) != false)
+        }.toList().sortedBy { it.name }
+    } }
+
+    suspend fun setColor(ip: String, key: String, lights: List<HueLight>, color: Rgb?, brightness: Int, temperature: Int? = null) = send(ip, key, lights) {
+        put("on", true); put("bri", (brightness.coerceIn(1, 100) * 254 / 100).coerceIn(1, 254)); put("transitiontime", 6)
+        if (temperature != null) put("ct", (1_000_000 / temperature.coerceIn(2000, 6500)).coerceIn(153, 500))
+        color?.let { put("xy", rgbToXy(it)) }
+    }
+
+    suspend fun setBrightness(ip: String, key: String, lights: List<HueLight>, brightness: Int) = send(ip, key, lights) {
+        put("on", true); put("bri", (brightness.coerceIn(1, 100) * 254 / 100).coerceIn(1, 254)); put("transitiontime", 4)
+    }
+    suspend fun turnOff(ip: String, key: String, lights: List<HueLight>) = send(ip, key, lights) { put("on", false); put("transitiontime", 4) }
+    suspend fun snapshot(ip: String, key: String, lights: List<HueLight>): Map<String, JSONObject> = withContext(Dispatchers.IO) {
+        buildMap { lights.forEach { light -> runCatching {
+            val state = JSONObject(request(ip, "/api/$key/lights/${light.id}")).getJSONObject("state")
+            put(light.id, JSONObject().apply { listOf("on", "bri", "xy", "ct", "hue", "sat", "effect").forEach { if (state.has(it)) put(it, state.get(it)) } })
+        } } }
+    }
+    suspend fun restore(ip: String, key: String, states: Map<String, JSONObject>): Result<Unit> = withContext(Dispatchers.IO) { runCatching {
+        states.forEach { (id, state) -> request(ip, "/api/$key/lights/$id/state", "PUT", state.put("transitiontime", 6)) }
+    } }
+
+    private suspend fun send(ip: String, key: String, lights: List<HueLight>, body: JSONObject.() -> Unit): Result<Unit> = withContext(Dispatchers.IO) { runCatching {
+        lights.filter { it.selected && it.online }.forEach { request(ip, "/api/$key/lights/${it.id}/state", "PUT", JSONObject().apply(body)) }
+    } }
+    private fun request(ip: String, path: String, method: String = "GET", body: JSONObject? = null): String {
+        val connection = URL("https://$ip$path").openConnection() as HttpsURLConnection
+        connection.sslSocketFactory = sslContext.socketFactory
+        connection.hostnameVerifier = HostnameVerifier { _, _ -> true }
+        connection.requestMethod = method; connection.connectTimeout = 2500; connection.readTimeout = 3000
+        if (body != null) { connection.doOutput = true; connection.setRequestProperty("Content-Type", "application/json"); connection.outputStream.use { it.write(body.toString().toByteArray()) } }
+        return connection.inputStream.bufferedReader().use { it.readText() }.also { connection.disconnect() }
+    }
+    private fun rgbToXy(rgb: Rgb): JSONArray {
+        fun linear(v: Int): Double { val n = v / 255.0; return if (n > .04045) ((n + .055) / 1.055).pow(2.4) else n / 12.92 }
+        val r = linear(rgb.r); val g = linear(rgb.g); val b = linear(rgb.b)
+        val x = r * .664511 + g * .154324 + b * .162028; val y = r * .283881 + g * .668433 + b * .047685; val z = r * .000088 + g * .07231 + b * .986039
+        val sum = x + y + z
+        return JSONArray().put(if (sum == 0.0) .3227 else x / sum).put(if (sum == 0.0) .329 else y / sum)
+    }
+    companion object {
+        private val sslContext = SSLContext.getInstance("TLS").apply { init(null, arrayOf<TrustManager>(object : X509TrustManager {
+            override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) = Unit
+            override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) = Unit
+            override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
+        }), SecureRandom()) }
+    }
+}
