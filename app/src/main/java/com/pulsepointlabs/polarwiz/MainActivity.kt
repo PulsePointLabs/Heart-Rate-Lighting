@@ -55,6 +55,7 @@ class MainActivity : AppCompatActivity() {
         binding.addIpButton.setOnClickListener { viewModel.addLightByIp(binding.manualIpText.text.toString()) }
         binding.pairHueButton.setOnClickListener { viewModel.pairHueBridge(binding.hueBridgeIpText.text.toString()) }
         binding.refreshHueButton.setOnClickListener { viewModel.refreshHueLights() }
+        binding.testHueButton.setOnClickListener { viewModel.testHueLights() }
         binding.demoSwitch.setOnCheckedChangeListener { _, checked -> viewModel.setDemo(checked) }
         binding.automationSwitch.setOnCheckedChangeListener { _, checked ->
             if (checked) requestNotificationPermissionIfNeeded()

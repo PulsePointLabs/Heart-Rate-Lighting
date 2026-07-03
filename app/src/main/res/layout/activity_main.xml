@@ -30,6 +30,8 @@
                 <Button android:id="@+id/refreshHueButton" style="@style/ActionButton" android:text="Refresh" />
             </LinearLayout>
             <TextView android:id="@+id/hueStatusText" style="@style/BodyText" android:text="Hue Bridge not paired" />
+            <Button android:id="@+id/testHueButton" style="@style/PrimaryButton"
+                android:layout_width="match_parent" android:layout_weight="0" android:text="Test selected Hue lights" />
             <LinearLayout android:id="@+id/hueLightList" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" />
         </LinearLayout>
 

@@ -12,7 +12,14 @@ data class WizLight(
     val group: String = "All lights",
     val lastSeenMs: Long = System.currentTimeMillis()
 )
-data class HueLight(val id: String, val name: String, val selected: Boolean = true, val online: Boolean = true)
+data class HueLight(
+    val id: String,
+    val name: String,
+    val selected: Boolean = true,
+    val online: Boolean = true,
+    val supportsColor: Boolean = true,
+    val supportsTemperature: Boolean = true
+)
 
 data class Rgb(val r: Int, val g: Int, val b: Int)
 

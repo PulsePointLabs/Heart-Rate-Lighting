@@ -234,6 +234,19 @@ class LightingRuntime(private val application: Application) {
         preferences.edit().putStringSet("hue_selected", lights.filter { it.selected }.map { it.id }.toSet()).apply()
     }
 
+    fun testHueLights() {
+        val credentials = hueCredentials() ?: return setError("Pair the Hue Bridge first")
+        val lights = selectedHueLights()
+        if (lights.isEmpty()) return setError("Select at least one online Hue light")
+        scope.launch {
+            _ui.value = _ui.value.copy(hueStatus = "Sending test command…", error = null)
+            hue.setColor(credentials.first, credentials.second, lights, null, 60, 3000).fold(
+                onSuccess = { _ui.value = _ui.value.copy(hueStatus = "Test accepted by ${lights.size} Hue light(s)", lastCommand = "Hue test: warm white 60%", error = null) },
+                onFailure = { setError("Hue test failed: ${it.message}"); _ui.value = _ui.value.copy(hueStatus = "Hue command rejected") }
+            )
+        }
+    }
+
     fun renameLight(address: String, requestedName: String) {
         val name = requestedName.trim().take(40)
         if (name.isBlank()) return
@@ -722,6 +735,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun pairHueBridge(ip: String) = runtime.pairHueBridge(ip)
     fun refreshHueLights() = runtime.refreshHueLights()
     fun setHueLightSelected(id: String, selected: Boolean) = runtime.setHueLightSelected(id, selected)
+    fun testHueLights() = runtime.testHueLights()
     fun renameLight(address: String, name: String) = runtime.renameLight(address, name)
     fun assignLightGroup(address: String, group: String) = runtime.assignLightGroup(address, group)
     fun createGroup(name: String) = runtime.createGroup(name)

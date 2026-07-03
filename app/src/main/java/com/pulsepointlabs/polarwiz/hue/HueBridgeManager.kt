@@ -2,6 +2,7 @@ package com.pulsepointlabs.polarwiz.hue
 
 import com.pulsepointlabs.polarwiz.model.HueLight
 import com.pulsepointlabs.polarwiz.model.Rgb
+import com.pulsepointlabs.polarwiz.DiagnosticLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -28,15 +29,23 @@ class HueBridgeManager {
         val json = JSONObject(request(ip, "/api/$key/lights"))
         json.keys().asSequence().map { id ->
             val item = json.getJSONObject(id)
-            HueLight(id, item.optString("name", "Hue light $id"), online = item.optJSONObject("state")?.optBoolean("reachable", true) != false)
+            val control = item.optJSONObject("capabilities")?.optJSONObject("control")
+            HueLight(
+                id,
+                item.optString("name", "Hue light $id"),
+                online = item.optJSONObject("state")?.optBoolean("reachable", true) != false,
+                supportsColor = control?.has("colorgamut") ?: item.optJSONObject("state")?.has("xy") ?: true,
+                supportsTemperature = control?.has("ct") ?: item.optJSONObject("state")?.has("ct") ?: true
+            )
         }.toList().sortedBy { it.name }
     } }
 
-    suspend fun setColor(ip: String, key: String, lights: List<HueLight>, color: Rgb?, brightness: Int, temperature: Int? = null) = send(ip, key, lights) {
-        put("on", true); put("bri", (brightness.coerceIn(1, 100) * 254 / 100).coerceIn(1, 254)); put("transitiontime", 6)
-        if (temperature != null) put("ct", (1_000_000 / temperature.coerceIn(2000, 6500)).coerceIn(153, 500))
-        color?.let { put("xy", rgbToXy(it)) }
-    }
+    suspend fun setColor(ip: String, key: String, lights: List<HueLight>, color: Rgb?, brightness: Int, temperature: Int? = null): Result<Unit> =
+        sendPerLight(ip, key, lights) { light -> JSONObject().apply {
+            put("on", true); put("bri", (brightness.coerceIn(1, 100) * 254 / 100).coerceIn(1, 254)); put("transitiontime", 6)
+            if (temperature != null && light.supportsTemperature) put("ct", (1_000_000 / temperature.coerceIn(2000, 6500)).coerceIn(153, 500))
+            if (color != null && light.supportsColor) put("xy", rgbToXy(color))
+        } }
 
     suspend fun setBrightness(ip: String, key: String, lights: List<HueLight>, brightness: Int) = send(ip, key, lights) {
         put("on", true); put("bri", (brightness.coerceIn(1, 100) * 254 / 100).coerceIn(1, 254)); put("transitiontime", 4)
@@ -49,12 +58,28 @@ class HueBridgeManager {
         } } }
     }
     suspend fun restore(ip: String, key: String, states: Map<String, JSONObject>): Result<Unit> = withContext(Dispatchers.IO) { runCatching {
-        states.forEach { (id, state) -> request(ip, "/api/$key/lights/$id/state", "PUT", state.put("transitiontime", 6)) }
+        states.forEach { (id, state) -> validateCommandResponse(request(ip, "/api/$key/lights/$id/state", "PUT", state.put("transitiontime", 6)), id) }
     } }
 
     private suspend fun send(ip: String, key: String, lights: List<HueLight>, body: JSONObject.() -> Unit): Result<Unit> = withContext(Dispatchers.IO) { runCatching {
-        lights.filter { it.selected && it.online }.forEach { request(ip, "/api/$key/lights/${it.id}/state", "PUT", JSONObject().apply(body)) }
+        lights.filter { it.selected && it.online }.forEach {
+            validateCommandResponse(request(ip, "/api/$key/lights/${it.id}/state", "PUT", JSONObject().apply(body)), it.id)
+        }
     } }
+    private suspend fun sendPerLight(ip: String, key: String, lights: List<HueLight>, body: (HueLight) -> JSONObject): Result<Unit> = withContext(Dispatchers.IO) { runCatching {
+        lights.filter { it.selected && it.online }.forEach { light ->
+            validateCommandResponse(request(ip, "/api/$key/lights/${light.id}/state", "PUT", body(light)), light.id)
+        }
+    } }
+    private fun validateCommandResponse(raw: String, lightId: String) {
+        val response = JSONArray(raw)
+        val error = (0 until response.length()).asSequence().mapNotNull { response.optJSONObject(it)?.optJSONObject("error") }.firstOrNull()
+        if (error != null) throw IllegalStateException("Light $lightId: ${error.optString("description", "bridge rejected command")}")
+        if ((0 until response.length()).none { response.optJSONObject(it)?.has("success") == true }) {
+            throw IllegalStateException("Light $lightId: bridge returned no success result")
+        }
+        DiagnosticLog.add("HueBridge", "Command accepted for Hue light $lightId")
+    }
     private fun request(ip: String, path: String, method: String = "GET", body: JSONObject? = null): String {
         val connection = URL("https://$ip$path").openConnection() as HttpsURLConnection
         connection.sslSocketFactory = sslContext.socketFactory
