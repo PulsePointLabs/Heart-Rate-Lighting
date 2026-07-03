@@ -55,6 +55,11 @@ class WizLanManager(context: Context) {
 
     suspend fun turnOff(lights: List<WizLight>): Result<Unit> = send(lights) { put("state", false) }
 
+    suspend fun setBrightness(lights: List<WizLight>, brightness: Int): Result<Unit> = send(lights) {
+        put("state", true)
+        put("dimming", brightness.coerceIn(10, 100))
+    }
+
     suspend fun pulse(lights: List<WizLight>, delta: Int = -8, durationMs: Int = 180): Result<Unit> =
         sendPayload(
             lights,

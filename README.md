@@ -44,6 +44,8 @@ On narrow portrait screens these controls render as compact pencil and bulb icon
 
 The brightness slider is also an automation-wide override. Once adjusted, its value is persisted locally and applied to every theme and every later HR zone instead of being replaced by that theme's built-in brightness. **Theme default** clears the override and restores each palette's normal zone brightness.
 
+Releasing the brightness slider immediately sends a brightness-only command to every selected light, preserving its current color. The app also persists light IPs, friendly names, selections, lighting theme, brightness override, automation switches, and the last H10 Bluetooth address. On launch it restores saved lights immediately, refreshes LAN discovery, and reconnects the H10 when Bluetooth permission is already available.
+
 Enable **Subtle heartbeat pulse** together with HR automation for a small brightness dip paced from smoothed BPM. It uses WiZ's native local `pulse` operation (`-8%`, roughly 120–220 ms), so the bulb restores itself without a second command. Pulse pacing is capped at two commands per second; normal zone commands remain throttled to one every three seconds.
 
 Connecting the H10 or enabling automation starts a foreground `connectedDevice` service. Its persistent notification keeps the BLE GATT session, zone mapping, and heartbeat pulses running when the screen locks or another app is in front. Explicitly disconnect the H10 and disable automation to stop the service. Android 13+ may ask for notification permission; declining hides the drawer notification but does not prevent the foreground service from running.

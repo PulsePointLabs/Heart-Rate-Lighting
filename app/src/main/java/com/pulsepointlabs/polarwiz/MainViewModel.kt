@@ -22,6 +22,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlin.math.sin
 import java.net.InetAddress
+import org.json.JSONArray
+import org.json.JSONObject
 
 data class UiState(
     val polarStatus: String = "Disconnected",
@@ -46,8 +48,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val wiz = WizLanManager(application)
     private val processor = HeartRateProcessor()
     private val preferences = application.getSharedPreferences("polar_wiz_preferences", 0)
+    private val restoredLights = loadSavedLights()
     private val _ui = MutableStateFlow(
-        UiState(brightnessOverride = preferences.getInt("brightness_override", -1).takeIf { it in 10..100 })
+        UiState(
+            wizStatus = if (restoredLights.isEmpty()) "No lights discovered" else "Restored ${restoredLights.size} saved light(s)",
+            lights = restoredLights,
+            lightingTheme = runCatching {
+                LightingTheme.valueOf(preferences.getString("lighting_theme", LightingTheme.PULSE.name)!!)
+            }.getOrDefault(LightingTheme.PULSE),
+            brightnessOverride = preferences.getInt("brightness_override", -1).takeIf { it in 10..100 },
+            automationEnabled = preferences.getBoolean("automation_enabled", false),
+            heartbeatPulseEnabled = preferences.getBoolean("heartbeat_pulse_enabled", false)
+        )
     )
     val ui: StateFlow<UiState> = _ui.asStateFlow()
     private var demoJob: Job? = null
@@ -62,10 +74,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { polar.connectionState.collect { _ui.value = _ui.value.copy(polarStatus = it) } }
         viewModelScope.launch { polar.errors.collect { setError(it) } }
         viewModelScope.launch { polar.readings.collect { (bpm, rr) -> if (!_ui.value.demoEnabled) acceptBpm(bpm, rr) } }
+        if (_ui.value.automationEnabled) updateBackgroundService()
+        if (_ui.value.heartbeatPulseEnabled) setHeartbeatPulse(true)
+        preferences.getString("last_h10_address", null)?.let { address ->
+            _ui.value = _ui.value.copy(polarStatus = "Reconnecting to saved H10…")
+            connectPolar(address)
+        }
+        if (restoredLights.isNotEmpty()) discoverLights(silentRefresh = true)
     }
 
     fun scanPolar() = polar.scan()
     fun connectPolar(id: String) {
+        preferences.edit().putString("last_h10_address", id).apply()
         polarSessionActive = true
         updateBackgroundService()
         polar.connect(id)
@@ -76,19 +96,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         updateBackgroundService()
     }
 
-    fun discoverLights() {
+    fun discoverLights(silentRefresh: Boolean = false) {
         viewModelScope.launch {
-            _ui.value = _ui.value.copy(wizStatus = "Discovering on local Wi-Fi…", error = null)
+            if (!silentRefresh) _ui.value = _ui.value.copy(wizStatus = "Discovering on local Wi-Fi…", error = null)
             runCatching { wiz.discover() }
                 .onSuccess { found ->
+                    val existing = _ui.value.lights.associateBy { it.address.hostAddress }
                     val named = found.sortedBy { it.address.hostAddress.orEmpty().split('.').lastOrNull()?.toIntOrNull() ?: 0 }
-                        .mapIndexed { index, light -> light.copy(name = savedLightName(light.address.hostAddress, index + 1)) }
+                        .mapIndexed { index, light ->
+                            light.copy(
+                                name = savedLightName(light.address.hostAddress, index + 1),
+                                selected = existing[light.address.hostAddress]?.selected ?: true
+                            )
+                        }
+                    val discoveredAddresses = named.map { it.address.hostAddress }.toSet()
+                    val savedOnly = existing.values.filterNot { it.address.hostAddress in discoveredAddresses }
+                    val merged = named + savedOnly
                     _ui.value = _ui.value.copy(
-                        lights = named,
-                        wizStatus = if (found.isEmpty()) "No WiZ lights replied" else "${found.size} light(s) online"
+                        lights = merged,
+                        wizStatus = when {
+                            found.isNotEmpty() -> "${found.size} light(s) online"
+                            merged.isNotEmpty() -> "Using ${merged.size} saved light address(es)"
+                            else -> "No WiZ lights replied"
+                        }
                     )
+                    persistLights()
                 }
-                .onFailure { setError("WiZ discovery failed: ${it.message}") }
+                .onFailure { if (!silentRefresh) setError("WiZ discovery failed: ${it.message}") }
         }
     }
 
@@ -96,6 +130,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _ui.value = _ui.value.copy(lights = _ui.value.lights.map {
             if (it.address.hostAddress == address) it.copy(selected = selected) else it
         })
+        persistLights()
     }
 
     fun renameLight(address: String, requestedName: String) {
@@ -105,6 +140,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _ui.value = _ui.value.copy(lights = _ui.value.lights.map {
             if (it.address.hostAddress == address) it.copy(name = name) else it
         })
+        persistLights()
     }
 
     fun identifyLight(address: String) {
@@ -127,6 +163,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_ui.value.lightingTheme == theme) return
         lastSentZone = null
         _ui.value = _ui.value.copy(lightingTheme = theme)
+        preferences.edit().putString("lighting_theme", theme.name).apply()
         if (_ui.value.automationEnabled) _ui.value.zone?.let(::queueAutomation)
     }
 
@@ -135,7 +172,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         preferences.edit().putInt("brightness_override", value).apply()
         _ui.value = _ui.value.copy(brightnessOverride = value)
         lastSentZone = null
-        if (_ui.value.automationEnabled) _ui.value.zone?.let(::queueAutomation)
+        viewModelScope.launch {
+            wiz.setBrightness(selectedLights(), value).fold(
+                onSuccess = { _ui.value = _ui.value.copy(lastCommand = "Brightness set to $value%", error = null) },
+                onFailure = { setError("Brightness command failed: ${it.message}") }
+            )
+        }
     }
 
     fun clearAutomationBrightness() {
@@ -157,6 +199,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     wizStatus = "Manual light added: $ip",
                     error = null
                 )
+                persistLights()
             }.onFailure { setError("Could not add WiZ IP: ${it.message}") }
         }
     }
@@ -183,6 +226,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setAutomation(enabled: Boolean) {
         lastSentZone = null
         _ui.value = _ui.value.copy(automationEnabled = enabled)
+        preferences.edit().putBoolean("automation_enabled", enabled).apply()
         updateBackgroundService()
         if (enabled) _ui.value.zone?.let(::queueAutomation)
     }
@@ -191,6 +235,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         heartbeatJob?.cancel()
         heartbeatJob = null
         _ui.value = _ui.value.copy(heartbeatPulseEnabled = enabled)
+        preferences.edit().putBoolean("heartbeat_pulse_enabled", enabled).apply()
         if (enabled) {
             heartbeatJob = viewModelScope.launch {
                 while (true) {
@@ -257,6 +302,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun savedLightName(address: String?, number: Int): String =
         address?.let { preferences.getString("light_name_$it", null) } ?: "WiZ Light $number"
     private fun setError(message: String) { Log.e(TAG, message); _ui.value = _ui.value.copy(error = message) }
+
+    private fun persistLights() {
+        val array = JSONArray()
+        _ui.value.lights.forEach { light ->
+            array.put(JSONObject().apply {
+                put("ip", light.address.hostAddress)
+                put("name", light.name)
+                put("selected", light.selected)
+            })
+        }
+        preferences.edit().putString("saved_lights", array.toString()).apply()
+    }
+
+    private fun loadSavedLights(): List<WizLight> = runCatching {
+        val array = JSONArray(preferences.getString("saved_lights", "[]"))
+        buildList {
+            for (index in 0 until array.length()) {
+                val item = array.getJSONObject(index)
+                val ip = item.getString("ip")
+                add(WizLight(
+                    address = InetAddress.getByName(ip),
+                    name = item.optString("name", "WiZ Light ${index + 1}"),
+                    selected = item.optBoolean("selected", true),
+                    online = true
+                ))
+            }
+        }
+    }.getOrElse {
+        Log.w(TAG, "Could not restore saved lights", it)
+        emptyList()
+    }
 
     private fun updateBackgroundService() {
         val context = getApplication<Application>()
