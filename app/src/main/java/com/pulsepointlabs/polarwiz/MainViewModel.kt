@@ -13,6 +13,8 @@ import com.pulsepointlabs.polarwiz.model.Rgb
 import com.pulsepointlabs.polarwiz.model.WizLight
 import com.pulsepointlabs.polarwiz.model.LightingTheme
 import com.pulsepointlabs.polarwiz.wiz.WizLanManager
+import com.pulsepointlabs.polarwiz.sleep.SleepWakeDetector
+import com.pulsepointlabs.polarwiz.sleep.SleepWakeMonitor
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -41,6 +43,9 @@ data class UiState(
     val automationEnabled: Boolean = false,
     val heartbeatPulseEnabled: Boolean = false,
     val heartbeatPulseIntensity: Int = 8,
+    val sleepAutomationEnabled: Boolean = false,
+    val restoreLightsOnWake: Boolean = true,
+    val sleepStatus: String = "Awake",
     val automationPaused: Boolean = false,
     val activeGroup: String = "All lights",
     val groups: List<String> = listOf("All lights"),
@@ -69,6 +74,8 @@ class LightingRuntime(private val application: Application) {
             automationEnabled = preferences.getBoolean("automation_enabled", false),
             heartbeatPulseEnabled = preferences.getBoolean("heartbeat_pulse_enabled", false),
             heartbeatPulseIntensity = preferences.getInt("heartbeat_pulse_intensity", 8).coerceIn(2, 40),
+            sleepAutomationEnabled = preferences.getBoolean("sleep_automation_enabled", false),
+            restoreLightsOnWake = preferences.getBoolean("restore_lights_on_wake", true),
             groups = restoredGroups,
             activeGroup = preferences.getString("active_group", "All lights")
                 ?.takeIf { it in restoredGroups } ?: "All lights"
@@ -79,11 +86,15 @@ class LightingRuntime(private val application: Application) {
     private var automationJob: Job? = null
     private var heartbeatJob: Job? = null
     private var healthJob: Job? = null
+    private var sleepEvaluationJob: Job? = null
     private var lastSentZone: HrZone? = null
     private var lastCommandAt = 0L
     private var polarSessionActive = false
     @Volatile private var lastSarahVsSampleAt = 0L
     private var previousLightStates: Map<String, JSONObject> = emptyMap()
+    private var preSleepLightStates: Map<String, JSONObject> = emptyMap()
+    private val sleepDetector = SleepWakeDetector()
+    private val sleepMonitor = SleepWakeMonitor(application, ::acceptMotion, ::acceptSignificantMotion)
 
     init {
         scope.launch { polar.devices.collect { _ui.value = _ui.value.copy(polarDevices = it) } }
@@ -94,6 +105,10 @@ class LightingRuntime(private val application: Application) {
         } }
         if (_ui.value.automationEnabled) updateBackgroundService()
         if (_ui.value.heartbeatPulseEnabled) setHeartbeatPulse(true)
+        if (_ui.value.sleepAutomationEnabled) {
+            startSleepDetection()
+            updateBackgroundService()
+        }
         preferences.getString("last_h10_address", null)?.let { address ->
             _ui.value = _ui.value.copy(polarStatus = "Reconnecting to saved H10…")
             connectPolar(address)
@@ -344,7 +359,7 @@ class LightingRuntime(private val application: Application) {
                 while (true) {
                     val state = _ui.value
                     val bpm = state.smoothedBpm
-                    if (state.automationEnabled && !state.automationPaused && bpm != null && selectedLights().isNotEmpty()) {
+                    if (state.automationEnabled && !state.automationPaused && sleepDetector.state != SleepWakeDetector.State.SLEEPING && bpm != null && selectedLights().isNotEmpty()) {
                         val intervalMs = (state.rrMs?.toLong()?.coerceIn(300L, 2_000L)
                             ?: (60_000L / bpm.coerceIn(40, 200))).coerceAtLeast(500L)
                         val durationMs = (intervalMs / 3).toInt().coerceIn(120, 220)
@@ -363,6 +378,103 @@ class LightingRuntime(private val application: Application) {
         val value = intensity.coerceIn(2, 40)
         _ui.value = _ui.value.copy(heartbeatPulseIntensity = value)
         preferences.edit().putInt("heartbeat_pulse_intensity", value).apply()
+    }
+
+    fun setSleepAutomation(enabled: Boolean) {
+        val wasSleeping = sleepDetector.state == SleepWakeDetector.State.SLEEPING
+        preferences.edit().putBoolean("sleep_automation_enabled", enabled).apply()
+        _ui.value = _ui.value.copy(
+            sleepAutomationEnabled = enabled,
+            sleepStatus = if (enabled) "Monitoring motion and heart rate" else "Awake"
+        )
+        if (enabled) {
+            startSleepDetection()
+        } else {
+            if (wasSleeping) handleSleepEvent(sleepDetector.onSignificantMotion())
+            stopSleepDetection(clearSnapshot = !wasSleeping)
+        }
+        updateBackgroundService()
+    }
+
+    fun setRestoreLightsOnWake(enabled: Boolean) {
+        preferences.edit().putBoolean("restore_lights_on_wake", enabled).apply()
+        _ui.value = _ui.value.copy(restoreLightsOnWake = enabled)
+    }
+
+    private fun startSleepDetection() {
+        sleepDetector.reset()
+        val hasAccelerometer = sleepMonitor.start()
+        _ui.value = _ui.value.copy(sleepStatus = if (hasAccelerometer) {
+            "Monitoring — sleep requires 20 min low motion + stable HR"
+        } else {
+            "Accelerometer unavailable"
+        })
+        sleepEvaluationJob?.cancel()
+        if (hasAccelerometer) {
+            sleepEvaluationJob = scope.launch {
+                while (true) {
+                    delay(5_000)
+                    handleSleepEvent(sleepDetector.evaluate())
+                }
+            }
+        }
+    }
+
+    private fun stopSleepDetection(clearSnapshot: Boolean = true) {
+        sleepEvaluationJob?.cancel()
+        sleepEvaluationJob = null
+        sleepMonitor.stop()
+        sleepDetector.reset()
+        if (clearSnapshot) preSleepLightStates = emptyMap()
+    }
+
+    private fun acceptMotion(acceleration: Float) {
+        if (_ui.value.sleepAutomationEnabled) handleSleepEvent(sleepDetector.onMotion(acceleration))
+    }
+
+    private fun acceptSignificantMotion() {
+        if (_ui.value.sleepAutomationEnabled) handleSleepEvent(sleepDetector.onSignificantMotion())
+    }
+
+    private fun handleSleepEvent(event: SleepWakeDetector.Event?) {
+        when (event) {
+            SleepWakeDetector.Event.SLEEP -> scope.launch {
+                val lights = selectedLights()
+                preSleepLightStates = wiz.snapshot(lights)
+                wiz.turnOff(lights).fold(
+                    onSuccess = {
+                        _ui.value = _ui.value.copy(sleepStatus = "Sleeping — lights off", lastCommand = "Sleep detected: lights off", error = null)
+                        DiagnosticLog.add(TAG, "Sleep detected; captured ${preSleepLightStates.size} light states and turned lights off")
+                    },
+                    onFailure = { setError("Sleep lights-off failed: ${it.message}") }
+                )
+            }
+            SleepWakeDetector.Event.WAKE -> scope.launch {
+                val state = _ui.value
+                val result = if (state.restoreLightsOnWake && preSleepLightStates.isNotEmpty()) {
+                    wiz.restore(state.lights, preSleepLightStates)
+                } else {
+                    val brightness = state.brightnessOverride
+                        ?: state.zone?.let { state.lightingTheme.styleFor(it).brightness }
+                        ?: 60
+                    wiz.setBrightness(selectedLights(), brightness)
+                }
+                result.fold(
+                    onSuccess = {
+                        _ui.value = _ui.value.copy(
+                            sleepStatus = "Awake — lights restored",
+                            lastCommand = if (state.restoreLightsOnWake) "Wake detected: prior light state restored" else "Wake detected: lights on",
+                            error = null
+                        )
+                        preSleepLightStates = emptyMap()
+                        lastSentZone = null
+                        DiagnosticLog.add(TAG, "Wake detected; lights restored")
+                    },
+                    onFailure = { setError("Wake light restore failed: ${it.message}") }
+                )
+            }
+            null -> Unit
+        }
     }
 
     fun setDemo(enabled: Boolean) {
@@ -398,7 +510,8 @@ class LightingRuntime(private val application: Application) {
         val smooth = processor.add(bpm)
         val zone = processor.zoneFor(smooth)
         _ui.value = _ui.value.copy(bpm = bpm, smoothedBpm = smooth, rrMs = rr, zone = zone)
-        if (_ui.value.automationEnabled && !_ui.value.automationPaused && zone != lastSentZone) queueAutomation(zone)
+        if (_ui.value.sleepAutomationEnabled) handleSleepEvent(sleepDetector.onHeartRate(smooth))
+        if (_ui.value.automationEnabled && !_ui.value.automationPaused && sleepDetector.state != SleepWakeDetector.State.SLEEPING && zone != lastSentZone) queueAutomation(zone)
     }
 
     private fun queueAutomation(zone: HrZone) {
@@ -406,7 +519,7 @@ class LightingRuntime(private val application: Application) {
         automationJob = scope.launch {
             val remaining = (lastCommandAt + MIN_COMMAND_INTERVAL_MS - System.currentTimeMillis()).coerceAtLeast(0)
             delay(remaining)
-            if (!_ui.value.automationEnabled || _ui.value.automationPaused || _ui.value.zone != zone || lastSentZone == zone) return@launch
+            if (!_ui.value.automationEnabled || _ui.value.automationPaused || sleepDetector.state == SleepWakeDetector.State.SLEEPING || _ui.value.zone != zone || lastSentZone == zone) return@launch
             val style = _ui.value.lightingTheme.styleFor(zone)
             val brightness = _ui.value.brightnessOverride ?: style.brightness
             wiz.setColor(selectedLights(), style.color, brightness, style.temperature).fold(
@@ -487,7 +600,7 @@ class LightingRuntime(private val application: Application) {
         val context = application
         runCatching {
             val intent = Intent(context, AutomationKeepAliveService::class.java)
-            if (polarSessionActive || _ui.value.automationEnabled) {
+            if (polarSessionActive || _ui.value.automationEnabled || _ui.value.sleepAutomationEnabled) {
                 ContextCompat.startForegroundService(context, intent)
             } else {
                 context.stopService(intent)
@@ -498,6 +611,7 @@ class LightingRuntime(private val application: Application) {
     fun shutdown() {
         heartbeatJob?.cancel()
         healthJob?.cancel()
+        stopSleepDetection()
         polar.close()
         application.stopService(Intent(application, AutomationKeepAliveService::class.java))
         scope.cancel()
@@ -535,5 +649,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setAutomation(enabled: Boolean) = runtime.setAutomation(enabled)
     fun setHeartbeatPulse(enabled: Boolean) = runtime.setHeartbeatPulse(enabled)
     fun setHeartbeatPulseIntensity(intensity: Int) = runtime.setHeartbeatPulseIntensity(intensity)
+    fun setSleepAutomation(enabled: Boolean) = runtime.setSleepAutomation(enabled)
+    fun setRestoreLightsOnWake(enabled: Boolean) = runtime.setRestoreLightsOnWake(enabled)
     fun setDemo(enabled: Boolean) = runtime.setDemo(enabled)
 }

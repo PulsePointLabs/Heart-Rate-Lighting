@@ -58,6 +58,11 @@ class MainActivity : AppCompatActivity() {
             viewModel.setAutomation(checked)
         }
         binding.heartbeatPulseSwitch.setOnCheckedChangeListener { _, checked -> viewModel.setHeartbeatPulse(checked) }
+        binding.sleepAutomationSwitch.setOnCheckedChangeListener { _, checked ->
+            if (checked) requestNotificationPermissionIfNeeded()
+            viewModel.setSleepAutomation(checked)
+        }
+        binding.restoreOnWakeSwitch.setOnCheckedChangeListener { _, checked -> viewModel.setRestoreLightsOnWake(checked) }
         binding.heartbeatIntensitySeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 if (fromUser) binding.heartbeatIntensityLabel.text = "Heartbeat reaction: ${progress.coerceIn(2, 40)}%"
@@ -125,6 +130,10 @@ class MainActivity : AppCompatActivity() {
         if (demoSwitch.isChecked != state.demoEnabled) demoSwitch.isChecked = state.demoEnabled
         if (automationSwitch.isChecked != state.automationEnabled) automationSwitch.isChecked = state.automationEnabled
         if (heartbeatPulseSwitch.isChecked != state.heartbeatPulseEnabled) heartbeatPulseSwitch.isChecked = state.heartbeatPulseEnabled
+        if (sleepAutomationSwitch.isChecked != state.sleepAutomationEnabled) sleepAutomationSwitch.isChecked = state.sleepAutomationEnabled
+        if (restoreOnWakeSwitch.isChecked != state.restoreLightsOnWake) restoreOnWakeSwitch.isChecked = state.restoreLightsOnWake
+        restoreOnWakeSwitch.isEnabled = state.sleepAutomationEnabled
+        sleepStatusText.text = "Sleep status: ${state.sleepStatus}"
         if (!heartbeatIntensitySeek.isPressed && heartbeatIntensitySeek.progress != state.heartbeatPulseIntensity) {
             heartbeatIntensitySeek.progress = state.heartbeatPulseIntensity
         }

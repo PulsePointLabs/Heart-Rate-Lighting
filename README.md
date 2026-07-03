@@ -60,6 +60,14 @@ Releasing the brightness slider immediately sends a brightness-only command to e
 
 Enable **Subtle heartbeat pulse** together with HR automation for a brightness dip paced from smoothed BPM. The **Heartbeat reaction** slider adjusts the dip from 2% (barely visible) to 40% (pronounced), persists across launches, and uses WiZ's native local `pulse` operation so the bulb restores itself without a second command. Pulse pacing is capped at two commands per second; normal zone commands remain throttled to one every three seconds.
 
+## Sleep / wake lighting
+
+Enable **Sleep / wake light automation** to combine the phone accelerometer with smoothed H10 heart rate. Sleep requires at least 20 minutes without meaningful movement, a stable five-minute HR window, and a plausible sleeping HR. On sleep, the app captures each selected bulb's exact local WiZ state before turning it off. Sustained movement, Android's significant-motion wake sensor, or a sustained HR increase wakes the lighting.
+
+**Restore previous light state on wake** is enabled by default. It restores power, color/temperature, brightness, scene, and speed values reported by each bulb before sleep. If disabled, wake simply turns selected lights on at the current manual/theme brightness while retaining their existing color. Normal HR zone commands and heartbeat pulses are suppressed while sleep is active.
+
+Sleep detection remains best-effort because Android manufacturers differ in how continuously they deliver ordinary accelerometer events with the screen off. The app runs its existing foreground service and also uses the low-power significant-motion wake sensor when the phone provides one. Keep the phone on the mattress or stable bedside surface where movement can be measured; aggressive battery restrictions may still need to be disabled for overnight use.
+
 Connecting the H10 or enabling automation starts a foreground `connectedDevice` service. Its persistent notification keeps the BLE GATT session, zone mapping, and heartbeat pulses running when the screen locks or another app is in front. Explicitly disconnect the H10 and disable automation to stop the service. Android 13+ may ask for notification permission; declining hides the drawer notification but does not prevent the foreground service from running.
 
 ## Permissions by Android version

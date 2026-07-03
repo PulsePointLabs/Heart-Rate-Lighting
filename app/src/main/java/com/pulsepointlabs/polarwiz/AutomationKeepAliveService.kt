@@ -35,7 +35,7 @@ class AutomationKeepAliveService : Service() {
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_polar_wiz)
             .setContentTitle("Polar WiZ lighting active")
-            .setContentText("H10 and local light automation continue in the background")
+            .setContentText("H10, sleep detection, and light automation continue in the background")
             .setContentIntent(openApp)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
