@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@color/navy" android:fillViewport="true">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:padding="16dp">
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="Polar H10 → WiZ" android:textColor="@color/text_primary" android:textSize="26sp" android:textStyle="bold" />
+
+        <TextView style="@style/SectionTitle" android:text="Polar H10" />
+        <LinearLayout style="@style/ButtonRow">
+            <Button android:id="@+id/scanPolarButton" style="@style/ActionButton" android:text="Scan" />
+            <Button android:id="@+id/disconnectPolarButton" style="@style/ActionButton" android:text="Disconnect" />
+        </LinearLayout>
+        <TextView android:id="@+id/polarStatusText" style="@style/BodyText" android:text="Disconnected" />
+        <LinearLayout android:id="@+id/polarDeviceList" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" />
+        <TextView android:id="@+id/bpmText" style="@style/MetricText" android:text="-- BPM" />
+        <TextView android:id="@+id/smoothedBpmText" style="@style/BodyText" android:text="Smoothed: --   RR: --" />
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/demoSwitch" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="Demo BPM simulation" android:textColor="@color/text_primary" />
+
+        <TextView style="@style/SectionTitle" android:text="WiZ lights" />
+        <Button android:id="@+id/discoverWizButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Discover lights" />
+        <LinearLayout style="@style/ButtonRow">
+            <EditText android:id="@+id/manualIpText" android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="2" android:hint="WiZ IP, e.g. 192.168.1.42" android:inputType="text" android:textColor="@color/text_primary" android:textColorHint="#9BA8B5" />
+            <Button android:id="@+id/addIpButton" style="@style/ActionButton" android:text="Add IP" />
+        </LinearLayout>
+        <TextView android:id="@+id/wizStatusText" style="@style/BodyText" android:text="No lights discovered" />
+        <LinearLayout android:id="@+id/wizLightList" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" />
+        <TextView style="@style/BodyText" android:text="Manual brightness" />
+        <SeekBar android:id="@+id/brightnessSeek" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="100" android:progress="60" />
+        <LinearLayout style="@style/ButtonRow">
+            <Button android:id="@+id/warmButton" style="@style/ActionButton" android:text="Warm" />
+            <Button android:id="@+id/violetButton" style="@style/ActionButton" android:text="Violet" />
+            <Button android:id="@+id/redButton" style="@style/ActionButton" android:text="Red" />
+            <Button android:id="@+id/offButton" style="@style/ActionButton" android:text="Off" />
+        </LinearLayout>
+
+        <TextView style="@style/SectionTitle" android:text="Automation" />
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/automationSwitch" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="Enable HR-controlled lighting" android:textColor="@color/text_primary" />
+        <TextView android:id="@+id/zoneText" style="@style/MetricText" android:text="Zone: --" />
+        <TextView android:id="@+id/lastCommandText" style="@style/BodyText" android:text="Last command: none" />
+        <TextView android:id="@+id/errorText" style="@style/BodyText" android:textColor="#FF9A9A" />
+    </LinearLayout>
+</ScrollView>
