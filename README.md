@@ -52,7 +52,7 @@ APK output: `C:\PulsePoint-Standalone\polar-wiz-hr\app\build\outputs\apk\debug\a
 - `app/src/main/AndroidManifest.xml` — permissions and launcher activity
 - `app/src/main/java/com/pulsepointlabs/polarwiz/MainActivity.kt` — single-screen UI and permission request
 - `app/src/main/java/com/pulsepointlabs/polarwiz/MainViewModel.kt` — state, simulation, and command throttling
-- `app/src/main/java/com/pulsepointlabs/polarwiz/ble/PolarH10Manager.kt` — official Polar SDK scan/connect/HR callbacks and reconnect
+- `app/src/main/java/com/pulsepointlabs/polarwiz/ble/PolarH10Manager.kt` — standard BLE HR scan/connect/notifications and bounded reconnect
 - `app/src/main/java/com/pulsepointlabs/polarwiz/wiz/WizLanManager.kt` — WiZ UDP discovery and `setPilot` control
 - `app/src/main/java/com/pulsepointlabs/polarwiz/hr/HeartRateProcessor.kt` — rolling average and hysteretic zones
 - `app/src/main/java/com/pulsepointlabs/polarwiz/model/Models.kt` — simple models and default zones
@@ -62,9 +62,12 @@ APK output: `C:\PulsePoint-Standalone\polar-wiz-hr\app\build\outputs\apk\debug\a
 
 ## Dependencies
 
-- Polar official BLE SDK `com.github.polarofficial:polar-ble-sdk:7.1.0`
 - AndroidX Core, AppCompat, Activity, Lifecycle ViewModel/Runtime
-- Kotlin coroutines Android + Rx3 bridge required by Polar SDK
+- Kotlin coroutines Android
 - JUnit 4 for local tests
 
 WiZ uses `java.net.DatagramSocket` and `org.json`; no WiZ/cloud dependency is used.
+
+Polar H10 uses Android's standard BLE Heart Rate Service (`0x180D`) and Heart Rate Measurement characteristic (`0x2A37`). This keeps the MVP independent of vendor-specific streaming and still provides BPM and RR intervals from the H10.
+
+If another app/device already uses the H10, enable its dual-Bluetooth mode in Polar Flow or Polar Beat. The H10 supports at most two simultaneous BLE receivers when that option is enabled; this app reports and retries a rejected connection without crashing.
