@@ -8,6 +8,7 @@ import com.pulsepointlabs.polarwiz.model.WizLight
 import com.pulsepointlabs.polarwiz.DiagnosticLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
 import org.json.JSONObject
 import java.net.DatagramPacket
 import java.net.DatagramSocket
@@ -130,6 +131,24 @@ class WizLanManager(context: Context) {
                 JSONObject().put("delta", delta.coerceIn(-80, -1)).put("duration", durationMs.coerceIn(100, 700))
             )
         )
+
+    suspend fun colorPulse(
+        lights: List<WizLight>,
+        color: Rgb,
+        baseBrightness: Int,
+        intensity: Int,
+        durationMs: Int,
+        baseTemperature: Int = 5000
+    ): Result<Unit> = withContext(Dispatchers.IO) { runCatching {
+        val pulseBrightness = (baseBrightness - intensity).coerceIn(10, 100)
+        sendPayload(lights, JSONObject().put("method", "setPilot").put("params", JSONObject().apply {
+            put("state", true); put("dimming", pulseBrightness); put("r", color.r); put("g", color.g); put("b", color.b)
+        })).getOrThrow()
+        delay(durationMs.toLong())
+        sendPayload(lights, JSONObject().put("method", "setPilot").put("params", JSONObject().apply {
+            put("state", true); put("dimming", baseBrightness.coerceIn(10, 100)); put("temp", baseTemperature.coerceIn(2200, 6500))
+        })).getOrThrow()
+    } }
 
     private suspend fun send(lights: List<WizLight>, params: JSONObject.() -> Unit): Result<Unit> =
         sendPayload(lights, JSONObject().put("method", "setPilot").put("params", JSONObject().apply(params)))

@@ -74,6 +74,29 @@ class HueBridgeManager {
                 "group $groupId pulse restore"
             )
         } }
+    suspend fun colorPulse(
+        ip: String,
+        key: String,
+        lights: List<HueLight>,
+        color: Rgb,
+        baseBrightness: Int,
+        intensity: Int,
+        durationMs: Int,
+        baseTemperature: Int = 5000
+    ): Result<Unit> = withContext(Dispatchers.IO) { runCatching {
+        val selected = lights.filter { it.selected && it.online }
+        if (selected.isEmpty()) return@runCatching
+        val groupId = ensureAppGroup(ip, key, selected)
+        val pulseBrightness = ((baseBrightness - intensity).coerceIn(1, 100) * 254 / 100).coerceIn(1, 254)
+        val base = (baseBrightness.coerceIn(1, 100) * 254 / 100).coerceIn(1, 254)
+        validateCommandResponse(request(ip, "/api/$key/groups/$groupId/action", "PUT", JSONObject().apply {
+            put("on", true); put("bri", pulseBrightness); put("xy", rgbToXy(color)); put("transitiontime", 1)
+        }), "group $groupId color pulse")
+        delay(durationMs.toLong())
+        validateCommandResponse(request(ip, "/api/$key/groups/$groupId/action", "PUT", JSONObject().apply {
+            put("bri", base); put("ct", (1_000_000 / baseTemperature.coerceIn(2000, 6500)).coerceIn(153, 500)); put("transitiontime", 2)
+        }), "group $groupId daylight restore")
+    } }
     suspend fun snapshot(ip: String, key: String, lights: List<HueLight>): Map<String, JSONObject> = withContext(Dispatchers.IO) {
         buildMap { lights.forEach { light -> runCatching {
             val state = JSONObject(request(ip, "/api/$key/lights/${light.id}")).getJSONObject("state")

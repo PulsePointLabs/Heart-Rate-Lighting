@@ -23,4 +23,13 @@ class LightingThemeTest {
             LightingTheme.EMBER.styleFor(HrZone.RED).color
         )
     }
+
+    @Test fun daylightColorPulseKeepsDaylightBaseAndMapsEveryHeartbeatColor() {
+        HrZone.entries.forEach { zone ->
+            val base = LightingTheme.DAYLIGHT_COLOR_PULSE.styleFor(zone)
+            assertEquals(5000, base.temperature)
+            assertEquals(90, base.brightness)
+            assertEquals(true, LightingTheme.DAYLIGHT_COLOR_PULSE.heartbeatColor(zone) != null)
+        }
+    }
 }

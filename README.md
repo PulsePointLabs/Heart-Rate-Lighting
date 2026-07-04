@@ -40,6 +40,8 @@ APK output: `C:\PulsePoint-Standalone\polar-wiz-hr\app\build\outputs\apk\debug\a
 
 Choose **Pulse**, **Ocean**, **Ember**, or **Daylight Tint** under Lighting theme. Daylight Tint remains bright at 80–100%, beginning at 5000 K neutral daylight and adding pale lavender, violet, blush, and coral as HR rises. Long-press any discovered light to replace `WiZ Light 1` with a local name such as `Bedroom Lamp`; aliases are stored only on the phone and keyed to the light's IP address.
 
+**Daylight + colored heartbeat** keeps every selected WiZ and Hue bulb at bright 5000 K daylight between beats. Each heartbeat briefly changes to the current HR-zone color—gold under 80, lavender at 80–99, violet at 100–119, pink/red at 120–139, and red at 140+—then restores daylight. The heartbeat reaction slider controls the brightness depth of that colored beat.
+
 Every discovered light also has explicit **Name** and **Identify** buttons. Name stores a local alias. Identify sends three deep, half-second brightness dips to that bulb only, making it easy to match an IP/list row to the physical fixture without changing its saved automation color.
 
 On narrow portrait screens these controls render as compact pencil and bulb icon buttons on the same row as a two-line light label, avoiding wrapped or clipped action text.
