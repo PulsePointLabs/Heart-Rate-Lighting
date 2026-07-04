@@ -426,13 +426,23 @@ class LightingRuntime(private val application: Application) {
                 while (true) {
                     val state = _ui.value
                     val bpm = state.smoothedBpm
-                    if (state.automationEnabled && !state.automationPaused && sleepDetector.state != SleepWakeDetector.State.SLEEPING && bpm != null && selectedLights().isNotEmpty()) {
+                    if (state.automationEnabled && !state.automationPaused && sleepDetector.state != SleepWakeDetector.State.SLEEPING && bpm != null && (selectedLights().isNotEmpty() || selectedHueLights().isNotEmpty())) {
+                        val pulseStartedAt = System.currentTimeMillis()
                         val intervalMs = (state.rrMs?.toLong()?.coerceIn(300L, 2_000L)
                             ?: (60_000L / bpm.coerceIn(40, 200))).coerceAtLeast(500L)
                         val durationMs = (intervalMs / 3).toInt().coerceIn(120, 220)
-                        wiz.pulse(selectedLights(), delta = -state.heartbeatPulseIntensity, durationMs = durationMs)
-                            .onFailure { Log.w(TAG, "Heartbeat pulse skipped: ${it.message}") }
-                        delay(intervalMs)
+                        selectedLights().takeIf { it.isNotEmpty() }?.let {
+                            wiz.pulse(it, delta = -state.heartbeatPulseIntensity, durationMs = durationMs)
+                                .onFailure { error -> Log.w(TAG, "WiZ heartbeat pulse skipped: ${error.message}") }
+                        }
+                        hueCredentials()?.takeIf { selectedHueLights().isNotEmpty() }?.let { (ip, key) ->
+                            val baseBrightness = state.brightnessOverride
+                                ?: state.zone?.let { state.lightingTheme.styleFor(it).brightness }
+                                ?: 60
+                            hue.pulse(ip, key, selectedHueLights(), baseBrightness, state.heartbeatPulseIntensity, durationMs)
+                                .onFailure { error -> Log.w(TAG, "Hue heartbeat pulse skipped: ${error.message}"); DiagnosticLog.add(TAG, "Hue pulse failed: ${error.message}") }
+                        }
+                        delay((intervalMs - (System.currentTimeMillis() - pulseStartedAt)).coerceAtLeast(100L))
                     } else {
                         delay(500)
                     }

@@ -5,6 +5,9 @@ import com.pulsepointlabs.polarwiz.model.Rgb
 import com.pulsepointlabs.polarwiz.DiagnosticLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URL
@@ -18,6 +21,9 @@ import javax.net.ssl.X509TrustManager
 import kotlin.math.pow
 
 class HueBridgeManager {
+    private val groupMutex = Mutex()
+    private var cachedGroupId: String? = null
+    private var cachedLightIds: Set<String> = emptySet()
     suspend fun pair(ip: String): Result<String> = withContext(Dispatchers.IO) { runCatching {
         val response = JSONArray(request(ip, "/api", "POST", JSONObject().put("devicetype", "polar_wiz_hr#android")))
         response.optJSONObject(0)?.optJSONObject("success")?.optString("username")
@@ -51,6 +57,23 @@ class HueBridgeManager {
         put("on", true); put("bri", (brightness.coerceIn(1, 100) * 254 / 100).coerceIn(1, 254)); put("transitiontime", 4)
     }
     suspend fun turnOff(ip: String, key: String, lights: List<HueLight>) = send(ip, key, lights) { put("on", false); put("transitiontime", 4) }
+    suspend fun pulse(ip: String, key: String, lights: List<HueLight>, baseBrightness: Int, intensity: Int, durationMs: Int): Result<Unit> =
+        withContext(Dispatchers.IO) { runCatching {
+            val selected = lights.filter { it.selected && it.online }
+            if (selected.isEmpty()) return@runCatching
+            val groupId = ensureAppGroup(ip, key, selected)
+            val base = (baseBrightness.coerceIn(10, 100) * 254 / 100).coerceIn(1, 254)
+            val dip = ((baseBrightness - intensity).coerceIn(1, 100) * 254 / 100).coerceIn(1, 254)
+            validateCommandResponse(
+                request(ip, "/api/$key/groups/$groupId/action", "PUT", JSONObject().put("on", true).put("bri", dip).put("transitiontime", 1)),
+                "group $groupId pulse down"
+            )
+            delay(durationMs.toLong())
+            validateCommandResponse(
+                request(ip, "/api/$key/groups/$groupId/action", "PUT", JSONObject().put("bri", base).put("transitiontime", 2)),
+                "group $groupId pulse restore"
+            )
+        } }
     suspend fun snapshot(ip: String, key: String, lights: List<HueLight>): Map<String, JSONObject> = withContext(Dispatchers.IO) {
         buildMap { lights.forEach { light -> runCatching {
             val state = JSONObject(request(ip, "/api/$key/lights/${light.id}")).getJSONObject("state")
@@ -71,6 +94,27 @@ class HueBridgeManager {
             validateCommandResponse(request(ip, "/api/$key/lights/${light.id}/state", "PUT", body(light)), light.id)
         }
     } }
+    private suspend fun ensureAppGroup(ip: String, key: String, lights: List<HueLight>): String = groupMutex.withLock {
+        val ids = lights.map { it.id }.toSet()
+        cachedGroupId?.takeIf { cachedLightIds == ids }?.let { return@withLock it }
+        val groups = JSONObject(request(ip, "/api/$key/groups"))
+        var groupId = groups.keys().asSequence().firstOrNull { groups.optJSONObject(it)?.optString("name") == APP_GROUP_NAME }
+        val body = JSONObject().put("name", APP_GROUP_NAME).put("lights", JSONArray(ids.toList()))
+        if (groupId == null) {
+            body.put("type", "LightGroup")
+            val created = JSONArray(request(ip, "/api/$key/groups", "POST", body))
+            val error = created.optJSONObject(0)?.optJSONObject("error")
+            if (error != null) throw IllegalStateException(error.optString("description", "Could not create Hue app group"))
+            groupId = created.optJSONObject(0)?.optJSONObject("success")?.optString("id")
+                ?: throw IllegalStateException("Hue Bridge did not return the app group ID")
+        } else {
+            validateCommandResponse(request(ip, "/api/$key/groups/$groupId", "PUT", body), "group $groupId update")
+        }
+        cachedGroupId = groupId
+        cachedLightIds = ids
+        DiagnosticLog.add("HueBridge", "App group $groupId contains Hue lights ${ids.sorted().joinToString()}")
+        groupId
+    }
     private fun validateCommandResponse(raw: String, lightId: String) {
         val response = JSONArray(raw)
         val error = (0 until response.length()).asSequence().mapNotNull { response.optJSONObject(it)?.optJSONObject("error") }.firstOrNull()
@@ -96,6 +140,7 @@ class HueBridgeManager {
         return JSONArray().put(if (sum == 0.0) .3227 else x / sum).put(if (sum == 0.0) .329 else y / sum)
     }
     companion object {
+        private const val APP_GROUP_NAME = "Polar WiZ HR"
         private val sslContext = SSLContext.getInstance("TLS").apply { init(null, arrayOf<TrustManager>(object : X509TrustManager {
             override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) = Unit
             override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) = Unit
