@@ -3,6 +3,7 @@ package com.pulsepointlabs.polarwiz
 import android.app.Application
 import android.util.Log
 import android.content.Intent
+import android.os.SystemClock
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import com.pulsepointlabs.polarwiz.ble.PolarH10Manager
@@ -23,7 +24,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.async
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -92,6 +92,8 @@ class LightingRuntime(private val application: Application) {
     private var demoJob: Job? = null
     private var automationJob: Job? = null
     private var heartbeatJob: Job? = null
+    private var wizPulseJob: Job? = null
+    private var huePulseJob: Job? = null
     private var healthJob: Job? = null
     private var sleepEvaluationJob: Job? = null
     private var lastSentZone: HrZone? = null
@@ -420,45 +422,53 @@ class LightingRuntime(private val application: Application) {
     fun setHeartbeatPulse(enabled: Boolean) {
         heartbeatJob?.cancel()
         heartbeatJob = null
+        wizPulseJob?.cancel()
+        huePulseJob?.cancel()
         _ui.value = _ui.value.copy(heartbeatPulseEnabled = enabled)
         preferences.edit().putBoolean("heartbeat_pulse_enabled", enabled).apply()
         if (enabled) {
             heartbeatJob = scope.launch {
+                var nextBeatAt = SystemClock.elapsedRealtime()
+                var smoothedIntervalMs: Double? = null
                 while (true) {
                     val state = _ui.value
                     val bpm = state.smoothedBpm
                     if (state.automationEnabled && !state.automationPaused && sleepDetector.state != SleepWakeDetector.State.SLEEPING && bpm != null && (selectedLights().isNotEmpty() || selectedHueLights().isNotEmpty())) {
-                        val pulseStartedAt = System.currentTimeMillis()
-                        val intervalMs = (state.rrMs?.toLong()?.coerceIn(300L, 2_000L)
-                            ?: (60_000L / bpm.coerceIn(40, 200))).coerceAtLeast(500L)
+                        val rawInterval = (state.rrMs?.toLong()?.coerceIn(300L, 2_000L)
+                            ?: (60_000L / bpm.coerceIn(40, 200))).coerceAtLeast(500L).toDouble()
+                        smoothedIntervalMs = smoothedIntervalMs?.let { previous -> previous * 0.72 + rawInterval * 0.28 } ?: rawInterval
+                        val intervalMs = smoothedIntervalMs.toLong().coerceIn(500L, 2_000L)
+                        val now = SystemClock.elapsedRealtime()
+                        if (nextBeatAt < now - intervalMs || nextBeatAt > now + intervalMs * 2) nextBeatAt = now
+                        if (nextBeatAt > now) delay(nextBeatAt - now)
+                        nextBeatAt += intervalMs
                         val durationMs = (intervalMs / 3).toInt().coerceIn(120, 220)
                         val zone = state.zone
                         val baseStyle = zone?.let { state.lightingTheme.styleFor(it) }
                         val baseBrightness = state.brightnessOverride ?: baseStyle?.brightness ?: 60
                         val heartbeatColor = zone?.let { state.lightingTheme.heartbeatColor(it) }
-                        val wizJob = selectedLights().takeIf { it.isNotEmpty() }?.let { lights -> async {
-                            if (heartbeatColor != null) {
-                                wiz.colorPulse(lights, heartbeatColor, baseBrightness, state.heartbeatPulseIntensity, durationMs, baseStyle?.temperature ?: 5000)
-                            } else {
-                                wiz.pulse(lights, delta = -state.heartbeatPulseIntensity, durationMs = durationMs)
-                            }
-                        } }
-                        val hueJob = hueCredentials()?.takeIf { selectedHueLights().isNotEmpty() }?.let { (ip, key) -> async {
-                            if (heartbeatColor != null) {
-                                hue.colorPulse(ip, key, selectedHueLights(), heartbeatColor, baseBrightness, state.heartbeatPulseIntensity, durationMs, baseStyle?.temperature ?: 5000)
-                            } else {
-                                hue.pulse(ip, key, selectedHueLights(), baseBrightness, state.heartbeatPulseIntensity, durationMs)
-                            }
-                        } }
-                        wizJob?.await()?.onFailure { error ->
-                            Log.w(TAG, "WiZ heartbeat pulse skipped: ${error.message}")
+                        val wizLights = selectedLights()
+                        if (wizLights.isNotEmpty() && wizPulseJob?.isActive != true) wizPulseJob = scope.launch {
+                            val result = if (heartbeatColor != null) {
+                                wiz.colorPulse(wizLights, heartbeatColor, baseBrightness, state.heartbeatPulseIntensity, durationMs, baseStyle?.temperature ?: 5000)
+                            } else wiz.pulse(wizLights, delta = -state.heartbeatPulseIntensity, durationMs = durationMs)
+                            result.onFailure { error -> Log.w(TAG, "WiZ heartbeat pulse skipped: ${error.message}") }
                         }
-                        hueJob?.await()?.onFailure { error ->
-                            Log.w(TAG, "Hue heartbeat pulse skipped: ${error.message}")
-                            DiagnosticLog.add(TAG, "Hue pulse failed: ${error.message}")
+                        val hueLights = selectedHueLights()
+                        hueCredentials()?.takeIf { hueLights.isNotEmpty() && huePulseJob?.isActive != true }?.let { (ip, key) ->
+                            huePulseJob = scope.launch {
+                                val result = if (heartbeatColor != null) {
+                                    hue.colorPulse(ip, key, hueLights, heartbeatColor, baseBrightness, state.heartbeatPulseIntensity, durationMs, baseStyle?.temperature ?: 5000)
+                                } else hue.pulse(ip, key, hueLights, baseBrightness, state.heartbeatPulseIntensity, durationMs)
+                                result.onFailure { error ->
+                                    Log.w(TAG, "Hue heartbeat pulse skipped: ${error.message}")
+                                    DiagnosticLog.add(TAG, "Hue pulse failed: ${error.message}")
+                                }
+                            }
                         }
-                        delay((intervalMs - (System.currentTimeMillis() - pulseStartedAt)).coerceAtLeast(100L))
                     } else {
+                        nextBeatAt = SystemClock.elapsedRealtime()
+                        smoothedIntervalMs = null
                         delay(500)
                     }
                 }
@@ -733,6 +743,8 @@ class LightingRuntime(private val application: Application) {
 
     fun shutdown() {
         heartbeatJob?.cancel()
+        wizPulseJob?.cancel()
+        huePulseJob?.cancel()
         healthJob?.cancel()
         stopSleepDetection()
         polar.close()
