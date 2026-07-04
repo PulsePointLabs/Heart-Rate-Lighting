@@ -62,6 +62,7 @@ class MainActivity : AppCompatActivity() {
             viewModel.setAutomation(checked)
         }
         binding.heartbeatPulseSwitch.setOnCheckedChangeListener { _, checked -> viewModel.setHeartbeatPulse(checked) }
+        binding.lowLatencySwitch.setOnCheckedChangeListener { _, checked -> viewModel.setLowLatencyMode(checked) }
         binding.sleepAutomationSwitch.setOnCheckedChangeListener { _, checked ->
             if (checked) requestNotificationPermissionIfNeeded()
             viewModel.setSleepAutomation(checked)
@@ -136,6 +137,7 @@ class MainActivity : AppCompatActivity() {
         if (demoSwitch.isChecked != state.demoEnabled) demoSwitch.isChecked = state.demoEnabled
         if (automationSwitch.isChecked != state.automationEnabled) automationSwitch.isChecked = state.automationEnabled
         if (heartbeatPulseSwitch.isChecked != state.heartbeatPulseEnabled) heartbeatPulseSwitch.isChecked = state.heartbeatPulseEnabled
+        if (lowLatencySwitch.isChecked != state.lowLatencyMode) lowLatencySwitch.isChecked = state.lowLatencyMode
         if (sleepAutomationSwitch.isChecked != state.sleepAutomationEnabled) sleepAutomationSwitch.isChecked = state.sleepAutomationEnabled
         if (restoreOnWakeSwitch.isChecked != state.restoreLightsOnWake) restoreOnWakeSwitch.isChecked = state.restoreLightsOnWake
         restoreOnWakeSwitch.isEnabled = state.sleepAutomationEnabled

@@ -44,6 +44,8 @@ Choose **Pulse**, **Ocean**, **Ember**, or **Daylight Tint** under Lighting them
 
 Heartbeat scheduling uses a monotonic absolute beat clock and light RR smoothing. WiZ UDP pulses and Hue HTTPS pulses run independently, so a slow Hue bridge response cannot delay the next WiZ beat. Each platform also allows only one pulse operation at a time, preventing overlapping restore commands and visible stutter.
 
+**Low-latency mode** is enabled by default while heartbeat reactions are active. It keeps one WiZ UDP socket open, requests Android high-performance and low-latency Wi-Fi modes, requests high-priority H10 BLE connection timing, and supports predicted beats down to 300 ms intervals (200 BPM). Disable it to reduce battery use. Standard BLE HR data reports RR timing after the electrical event, so this is predictive RR synchronization rather than raw-ECG R-wave triggering.
+
 Every discovered light also has explicit **Name** and **Identify** buttons. Name stores a local alias. Identify sends three deep, half-second brightness dips to that bulb only, making it easy to match an IP/list row to the physical fixture without changing its saved automation color.
 
 On narrow portrait screens these controls render as compact pencil and bulb icon buttons on the same row as a two-line light label, avoiding wrapped or clipped action text.

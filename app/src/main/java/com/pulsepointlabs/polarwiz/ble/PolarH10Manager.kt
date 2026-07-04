@@ -49,6 +49,7 @@ class PolarH10Manager(context: Context, private val scope: CoroutineScope) {
     private var reconnectAddress: String? = null
     private var reconnectAttempts = 0
     private var intentionalDisconnect = false
+    private var lowLatencyRequested = false
 
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) = acceptScanResult(result)
@@ -75,6 +76,9 @@ class PolarH10Manager(context: Context, private val scope: CoroutineScope) {
                     connectionState.value = "Connected; discovering heart-rate service…"
                     Log.i(TAG, "GATT connected status=$status address=${target.device.address}")
                     DiagnosticLog.add(TAG, "GATT connected status=$status address=${target.device.address}")
+                    target.requestConnectionPriority(
+                        if (lowLatencyRequested) BluetoothGatt.CONNECTION_PRIORITY_HIGH else BluetoothGatt.CONNECTION_PRIORITY_BALANCED
+                    )
                     if (!safeGatt("service discovery") { target.discoverServices() }) disconnectGatt(target)
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
@@ -163,6 +167,19 @@ class PolarH10Manager(context: Context, private val scope: CoroutineScope) {
         stopScan()
         disconnectGatt(gatt)
         connectionState.value = "Disconnected"
+    }
+
+    @SuppressLint("MissingPermission")
+    fun setLowLatency(enabled: Boolean) {
+        lowLatencyRequested = enabled
+        if (hasBlePermissions()) gatt?.let { target ->
+            runCatching {
+                target.requestConnectionPriority(
+                    if (enabled) BluetoothGatt.CONNECTION_PRIORITY_HIGH else BluetoothGatt.CONNECTION_PRIORITY_BALANCED
+                )
+            }
+            DiagnosticLog.add(TAG, "BLE connection priority: ${if (enabled) "high" else "balanced"}")
+        }
     }
 
     fun close() = disconnect()

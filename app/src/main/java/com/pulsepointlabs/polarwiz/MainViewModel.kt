@@ -49,6 +49,7 @@ data class UiState(
     val automationEnabled: Boolean = false,
     val heartbeatPulseEnabled: Boolean = false,
     val heartbeatPulseIntensity: Int = 8,
+    val lowLatencyMode: Boolean = true,
     val sleepAutomationEnabled: Boolean = false,
     val restoreLightsOnWake: Boolean = true,
     val sleepStatus: String = "Awake",
@@ -81,6 +82,7 @@ class LightingRuntime(private val application: Application) {
             automationEnabled = preferences.getBoolean("automation_enabled", false),
             heartbeatPulseEnabled = preferences.getBoolean("heartbeat_pulse_enabled", false),
             heartbeatPulseIntensity = preferences.getInt("heartbeat_pulse_intensity", 8).coerceIn(2, 40),
+            lowLatencyMode = preferences.getBoolean("low_latency_mode", true),
             sleepAutomationEnabled = preferences.getBoolean("sleep_automation_enabled", false),
             restoreLightsOnWake = preferences.getBoolean("restore_lights_on_wake", true),
             groups = restoredGroups,
@@ -402,6 +404,7 @@ class LightingRuntime(private val application: Application) {
         lastSentZone = null
         _ui.value = _ui.value.copy(automationEnabled = enabled)
         preferences.edit().putBoolean("automation_enabled", enabled).apply()
+        updateLowLatencyMode()
         updateBackgroundService()
         if (enabled) {
             scope.launch {
@@ -426,6 +429,7 @@ class LightingRuntime(private val application: Application) {
         huePulseJob?.cancel()
         _ui.value = _ui.value.copy(heartbeatPulseEnabled = enabled)
         preferences.edit().putBoolean("heartbeat_pulse_enabled", enabled).apply()
+        updateLowLatencyMode()
         if (enabled) {
             heartbeatJob = scope.launch {
                 var nextBeatAt = SystemClock.elapsedRealtime()
@@ -435,14 +439,14 @@ class LightingRuntime(private val application: Application) {
                     val bpm = state.smoothedBpm
                     if (state.automationEnabled && !state.automationPaused && sleepDetector.state != SleepWakeDetector.State.SLEEPING && bpm != null && (selectedLights().isNotEmpty() || selectedHueLights().isNotEmpty())) {
                         val rawInterval = (state.rrMs?.toLong()?.coerceIn(300L, 2_000L)
-                            ?: (60_000L / bpm.coerceIn(40, 200))).coerceAtLeast(500L).toDouble()
+                            ?: (60_000L / bpm.coerceIn(40, 200))).coerceAtLeast(300L).toDouble()
                         smoothedIntervalMs = smoothedIntervalMs?.let { previous -> previous * 0.72 + rawInterval * 0.28 } ?: rawInterval
-                        val intervalMs = smoothedIntervalMs.toLong().coerceIn(500L, 2_000L)
+                        val intervalMs = smoothedIntervalMs.toLong().coerceIn(300L, 2_000L)
                         val now = SystemClock.elapsedRealtime()
                         if (nextBeatAt < now - intervalMs || nextBeatAt > now + intervalMs * 2) nextBeatAt = now
                         if (nextBeatAt > now) delay(nextBeatAt - now)
                         nextBeatAt += intervalMs
-                        val durationMs = (intervalMs / 3).toInt().coerceIn(120, 220)
+                        val durationMs = (intervalMs / 3).toInt().coerceIn(100, 220)
                         val zone = state.zone
                         val baseStyle = zone?.let { state.lightingTheme.styleFor(it) }
                         val baseBrightness = state.brightnessOverride ?: baseStyle?.brightness ?: 60
@@ -480,6 +484,18 @@ class LightingRuntime(private val application: Application) {
         val value = intensity.coerceIn(2, 40)
         _ui.value = _ui.value.copy(heartbeatPulseIntensity = value)
         preferences.edit().putInt("heartbeat_pulse_intensity", value).apply()
+    }
+
+    fun setLowLatencyMode(enabled: Boolean) {
+        preferences.edit().putBoolean("low_latency_mode", enabled).apply()
+        _ui.value = _ui.value.copy(lowLatencyMode = enabled)
+        updateLowLatencyMode()
+    }
+
+    private fun updateLowLatencyMode() {
+        val active = _ui.value.lowLatencyMode && _ui.value.heartbeatPulseEnabled && _ui.value.automationEnabled
+        wiz.setLowLatency(active)
+        polar.setLowLatency(active)
     }
 
     fun setSleepAutomation(enabled: Boolean) {
@@ -748,6 +764,7 @@ class LightingRuntime(private val application: Application) {
         healthJob?.cancel()
         stopSleepDetection()
         polar.close()
+        wiz.close()
         application.stopService(Intent(application, AutomationKeepAliveService::class.java))
         scope.cancel()
     }
@@ -788,6 +805,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setAutomation(enabled: Boolean) = runtime.setAutomation(enabled)
     fun setHeartbeatPulse(enabled: Boolean) = runtime.setHeartbeatPulse(enabled)
     fun setHeartbeatPulseIntensity(intensity: Int) = runtime.setHeartbeatPulseIntensity(intensity)
+    fun setLowLatencyMode(enabled: Boolean) = runtime.setLowLatencyMode(enabled)
     fun setSleepAutomation(enabled: Boolean) = runtime.setSleepAutomation(enabled)
     fun setRestoreLightsOnWake(enabled: Boolean) = runtime.setRestoreLightsOnWake(enabled)
     fun setDemo(enabled: Boolean) = runtime.setDemo(enabled)

@@ -89,6 +89,9 @@
             <androidx.appcompat.widget.SwitchCompat android:id="@+id/heartbeatPulseSwitch"
                 android:layout_width="match_parent" android:layout_height="48dp"
                 android:text="Subtle heartbeat pulse" android:textColor="@color/text_primary" />
+            <androidx.appcompat.widget.SwitchCompat android:id="@+id/lowLatencySwitch"
+                android:layout_width="match_parent" android:layout_height="48dp"
+                android:text="Low-latency mode (higher battery use)" android:textColor="@color/text_primary" />
             <TextView android:id="@+id/heartbeatIntensityLabel" style="@style/BodyText"
                 android:text="Heartbeat reaction: 8%" />
             <SeekBar android:id="@+id/heartbeatIntensitySeek" android:layout_width="match_parent"

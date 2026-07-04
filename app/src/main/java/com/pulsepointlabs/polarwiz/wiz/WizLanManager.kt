@@ -17,6 +17,29 @@ import java.net.SocketTimeoutException
 
 class WizLanManager(context: Context) {
     private val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+    private val commandSocket = DatagramSocket()
+    private val socketLock = Any()
+    @Suppress("DEPRECATION")
+    private val highPerformanceLock = wifi.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "polar-wiz-high-performance").apply { setReferenceCounted(false) }
+    private val lowLatencyLock = wifi.createWifiLock(WifiManager.WIFI_MODE_FULL_LOW_LATENCY, "polar-wiz-low-latency").apply { setReferenceCounted(false) }
+
+    fun setLowLatency(enabled: Boolean) {
+        runCatching {
+            if (enabled) {
+                if (!highPerformanceLock.isHeld) highPerformanceLock.acquire()
+                if (!lowLatencyLock.isHeld) lowLatencyLock.acquire()
+            } else {
+                if (lowLatencyLock.isHeld) lowLatencyLock.release()
+                if (highPerformanceLock.isHeld) highPerformanceLock.release()
+            }
+            DiagnosticLog.add(TAG, "Wi-Fi low-latency mode ${if (enabled) "enabled" else "disabled"}")
+        }.onFailure { Log.w(TAG, "Could not change Wi-Fi latency mode", it) }
+    }
+
+    fun close() {
+        setLowLatency(false)
+        commandSocket.close()
+    }
 
     suspend fun discover(timeoutMs: Int = 3_000): List<WizLight> = withContext(Dispatchers.IO) {
         val found = linkedMapOf<String, WizLight>()
@@ -157,9 +180,9 @@ class WizLanManager(context: Context) {
         if (lights.isEmpty()) return@withContext Result.failure(IllegalStateException("Select at least one WiZ light"))
         runCatching {
             val payload = message.toString().toByteArray()
-            DatagramSocket().use { socket ->
+            synchronized(socketLock) {
                 lights.forEach { light ->
-                    socket.send(DatagramPacket(payload, payload.size, light.address, PORT))
+                    commandSocket.send(DatagramPacket(payload, payload.size, light.address, PORT))
                     Log.i(TAG, "Command ${String(payload)} -> ${light.address.hostAddress}")
                     DiagnosticLog.add(TAG, "${message.optString("method")} -> ${light.name} ${light.address.hostAddress}")
                 }
