@@ -17,6 +17,8 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.CancellationException
 import kotlin.math.sqrt
 
 class PolarPrecisionManager(context: Context, private val scope: CoroutineScope) {
@@ -30,19 +32,19 @@ class PolarPrecisionManager(context: Context, private val scope: CoroutineScope)
     private var ecgJob: Job? = null
     private var accJob: Job? = null
     private var hrJob: Job? = null
+    private val crashBoundary = CoroutineExceptionHandler { _, error -> fail(error) }
     private val api = PolarBleApiDefaultImpl.defaultImplementation(
         context.applicationContext,
         setOf(PolarBleApi.PolarBleSdkFeature.FEATURE_POLAR_ONLINE_STREAMING)
     ).apply {
         setApiCallback(object : PolarBleApiCallback() {
-            override fun deviceConnecting(polarDeviceInfo: PolarDeviceInfo) { status.value = "ECG mode connecting…" }
+            override fun deviceConnecting(polarDeviceInfo: PolarDeviceInfo) = guard { status.value = "ECG mode connecting…" }
             override fun deviceConnected(polarDeviceInfo: PolarDeviceInfo) {
-                deviceId = polarDeviceInfo.deviceId
-                status.value = "ECG mode connected; starting streams…"
+                guard { deviceId = polarDeviceInfo.deviceId; status.value = "ECG mode connected; starting streams…" }
             }
-            override fun deviceDisconnected(polarDeviceInfo: PolarDeviceInfo) { status.value = "ECG mode disconnected"; stopJobs() }
+            override fun deviceDisconnected(polarDeviceInfo: PolarDeviceInfo) = guard { status.value = "ECG mode disconnected"; stopJobs() }
             override fun bleSdkFeatureReady(identifier: String, feature: PolarBleApi.PolarBleSdkFeature) {
-                if (feature == PolarBleApi.PolarBleSdkFeature.FEATURE_POLAR_ONLINE_STREAMING) startStreams(identifier)
+                guard { if (feature == PolarBleApi.PolarBleSdkFeature.FEATURE_POLAR_ONLINE_STREAMING) startStreams(identifier) }
             }
             override fun disInformationReceived(identifier: String, disInfo: DisInfo) = Unit
             override fun htsNotificationReceived(identifier: String, data: PolarHealthThermometerData) = Unit
@@ -63,32 +65,32 @@ class PolarPrecisionManager(context: Context, private val scope: CoroutineScope)
     private fun startStreams(identifier: String) {
         stopJobs()
         status.value = "ECG + chest motion streaming"
-        hrJob = scope.launch {
-            api.startHrStreaming(identifier).catch { fail(it) }.collect { data ->
+        hrJob = scope.launch(crashBoundary) {
+            try { api.startHrStreaming(identifier).collect { data ->
                 data.samples.forEach { sample -> readings.tryEmit(sample.hr to sample.rrsMs.lastOrNull()) }
-            }
+            } } catch (cancelled: CancellationException) { throw cancelled } catch (error: Throwable) { fail(error) }
         }
-        ecgJob = scope.launch {
-            runCatching { api.requestStreamSettings(identifier, PolarBleApi.PolarDeviceDataType.ECG) }
-                .onSuccess { settings ->
-                    api.startEcgStreaming(identifier, settings.maxSettings()).catch { fail(it) }.collect { data ->
+        ecgJob = scope.launch(crashBoundary) {
+            try {
+                val settings = api.requestStreamSettings(identifier, PolarBleApi.PolarDeviceDataType.ECG)
+                api.startEcgStreaming(identifier, settings.maxSettings()).collect { data ->
                         data.samples.forEach { sample ->
                             val voltage = (sample as? EcgSample)?.voltage ?: return@forEach
                             if (detector.add(voltage)) rPeaks.tryEmit(android.os.SystemClock.elapsedRealtimeNanos())
                         }
-                    }
-                }.onFailure(::fail)
+                }
+            } catch (cancelled: CancellationException) { throw cancelled } catch (error: Throwable) { fail(error) }
         }
-        accJob = scope.launch {
-            runCatching { api.requestStreamSettings(identifier, PolarBleApi.PolarDeviceDataType.ACC) }
-                .onSuccess { settings ->
-                    api.startAccStreaming(identifier, settings.maxSettings()).catch { fail(it) }.collect { data ->
+        accJob = scope.launch(crashBoundary) {
+            try {
+                val settings = api.requestStreamSettings(identifier, PolarBleApi.PolarDeviceDataType.ACC)
+                api.startAccStreaming(identifier, settings.maxSettings()).collect { data ->
                         data.samples.forEach { sample ->
                             val magnitude = sqrt((sample.x * sample.x + sample.y * sample.y + sample.z * sample.z).toDouble()).toFloat()
                             chestMotion.tryEmit(kotlin.math.abs(magnitude - 1000f) / 1000f)
                         }
-                    }
-                }.onFailure(::fail)
+                }
+            } catch (cancelled: CancellationException) { throw cancelled } catch (error: Throwable) { fail(error) }
         }
         DiagnosticLog.add(TAG, "ECG and accelerometer streams started")
     }
@@ -97,5 +99,6 @@ class PolarPrecisionManager(context: Context, private val scope: CoroutineScope)
     private fun closeConnection() { stopJobs(); deviceId?.let { runCatching { api.disconnectFromDevice(it) } }; deviceId = null }
     fun shutdown() { closeConnection(); api.shutDown() }
     private fun fail(error: Throwable) { val message = error.message ?: error.javaClass.simpleName; errors.tryEmit(message); DiagnosticLog.add(TAG, message) }
+    private inline fun guard(block: () -> Unit) { runCatching(block).onFailure(::fail) }
     companion object { private const val TAG = "PolarPrecision" }
 }

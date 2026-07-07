@@ -96,7 +96,7 @@ class LightingRuntime(private val application: Application) {
             heartbeatPulseEnabled = preferences.getBoolean("heartbeat_pulse_enabled", false),
             heartbeatPulseIntensity = preferences.getInt("heartbeat_pulse_intensity", 8).coerceIn(2, 40),
             lowLatencyMode = preferences.getBoolean("low_latency_mode", true),
-            precisionMode = preferences.getBoolean("precision_mode", false),
+            precisionMode = false,
             pulseShape = runCatching { PulseShape.valueOf(preferences.getString("pulse_shape", PulseShape.SINGLE.name)!!) }.getOrDefault(PulseShape.SINGLE),
             wizTimingOffsetMs = preferences.getInt("wiz_timing_offset", 0).coerceIn(0, 300),
             hueTimingOffsetMs = preferences.getInt("hue_timing_offset", 0).coerceIn(0, 300),
@@ -142,7 +142,15 @@ class LightingRuntime(private val application: Application) {
             if (!_ui.value.demoEnabled && System.currentTimeMillis() - lastSarahVsSampleAt > SARAHVS_FEED_TIMEOUT_MS) acceptBpm(bpm, rr)
         } }
         scope.launch { precision.status.collect { _ui.value = _ui.value.copy(polarStatus = it, precisionStatus = it) } }
-        scope.launch { precision.errors.collect { DiagnosticLog.add(TAG, "Precision stream: $it"); _ui.value = _ui.value.copy(precisionStatus = "ECG fallback: $it") } }
+        scope.launch { precision.errors.collect { error ->
+            DiagnosticLog.add(TAG, "Precision stream: $error")
+            if (_ui.value.precisionMode) {
+                preferences.edit().putBoolean("precision_mode", false).apply()
+                _ui.value = _ui.value.copy(precisionMode = false, precisionStatus = "ECG safely disabled: $error", error = "ECG unavailable; standard BLE restored")
+                precision.disconnect()
+                preferences.getString("last_h10_address", null)?.let { address -> scope.launch { delay(750); polar.connect(address) } }
+            }
+        } }
         scope.launch { precision.readings.collect { (bpm, rr) -> if (_ui.value.precisionMode && !_ui.value.demoEnabled) acceptBpm(bpm, rr) } }
         scope.launch { precision.chestMotion.collect { motion ->
             if (_ui.value.precisionMode) { _ui.value = _ui.value.copy(chestMotion = motion); acceptMotion(motion) }
@@ -220,7 +228,7 @@ class LightingRuntime(private val application: Application) {
         updateBackgroundService()
         if (_ui.value.precisionMode) {
             precisionConnectStartedAt = System.currentTimeMillis(); precisionFallbackAttempted = false
-            polar.disconnect(); precision.connect(id)
+            polar.disconnect(); scope.launch { delay(750); if (_ui.value.precisionMode) precision.connect(id) }
         }
         else { precision.disconnect(); polar.connect(id) }
     }
@@ -232,7 +240,7 @@ class LightingRuntime(private val application: Application) {
     }
 
     fun setPrecisionMode(enabled: Boolean) {
-        preferences.edit().putBoolean("precision_mode", enabled).apply()
+        preferences.edit().putBoolean("precision_mode", false).apply()
         _ui.value = _ui.value.copy(precisionMode = enabled, precisionStatus = if (enabled) "ECG mode reconnecting…" else "Standard RR timing")
         preferences.getString("last_h10_address", null)?.let(::connectPolar)
     }
