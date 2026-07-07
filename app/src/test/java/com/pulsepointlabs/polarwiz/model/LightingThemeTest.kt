@@ -32,4 +32,8 @@ class LightingThemeTest {
             assertEquals(true, LightingTheme.DAYLIGHT_COLOR_PULSE.heartbeatColor(zone) != null)
         }
     }
+
+    @Test fun everyPulseShapeHasAUsableEnvelope() {
+        PulseShape.entries.forEach { assertEquals(true, it.durationMs in 80..300) }
+    }
 }

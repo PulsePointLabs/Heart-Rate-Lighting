@@ -92,10 +92,27 @@
             <androidx.appcompat.widget.SwitchCompat android:id="@+id/lowLatencySwitch"
                 android:layout_width="match_parent" android:layout_height="48dp"
                 android:text="Low-latency mode (higher battery use)" android:textColor="@color/text_primary" />
+            <androidx.appcompat.widget.SwitchCompat android:id="@+id/precisionModeSwitch"
+                android:layout_width="match_parent" android:layout_height="48dp"
+                android:text="ECG R-wave precision mode" android:textColor="@color/text_primary" />
+            <TextView android:id="@+id/precisionStatusText" style="@style/BodyText" android:text="Standard RR timing" />
+            <TextView style="@style/BodyText" android:text="Heartbeat shape" />
+            <Spinner android:id="@+id/pulseShapeSpinner" android:layout_width="match_parent" android:layout_height="48dp"
+                android:popupBackground="@color/panel_variant" />
             <TextView android:id="@+id/heartbeatIntensityLabel" style="@style/BodyText"
                 android:text="Heartbeat reaction: 8%" />
             <SeekBar android:id="@+id/heartbeatIntensitySeek" android:layout_width="match_parent"
                 android:layout_height="wrap_content" android:min="2" android:max="40" android:progress="8" />
+            <TextView android:id="@+id/wizOffsetLabel" style="@style/BodyText" android:text="WiZ timing delay: 0 ms" />
+            <SeekBar android:id="@+id/wizOffsetSeek" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="300" android:progress="0" />
+            <TextView android:id="@+id/hueOffsetLabel" style="@style/BodyText" android:text="Hue timing delay: 0 ms" />
+            <SeekBar android:id="@+id/hueOffsetSeek" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="300" android:progress="0" />
+            <Button android:id="@+id/autoCalibrateButton" style="@style/CompactButton"
+                android:layout_width="match_parent" android:text="Auto-calibrate WiZ / Hue timing" />
+            <androidx.appcompat.widget.SwitchCompat android:id="@+id/circadianSwitch"
+                android:layout_width="match_parent" android:layout_height="48dp"
+                android:text="Circadian daylight schedule" android:textColor="@color/text_primary" />
+            <TextView android:id="@+id/signalStatusText" style="@style/BodyText" android:text="Signal: waiting" />
             <androidx.appcompat.widget.SwitchCompat android:id="@+id/sleepAutomationSwitch"
                 android:layout_width="match_parent" android:layout_height="48dp"
                 android:text="Sleep / wake light automation" android:textColor="@color/text_primary" />

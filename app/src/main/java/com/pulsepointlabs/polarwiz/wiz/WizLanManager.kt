@@ -14,6 +14,7 @@ import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.SocketTimeoutException
+import android.os.SystemClock
 
 class WizLanManager(context: Context) {
     private val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
@@ -109,6 +110,13 @@ class WizLanManager(context: Context) {
                 }
             }
         }
+    }
+
+    suspend fun measureLatency(light: WizLight): Long = withContext(Dispatchers.IO) {
+        List(5) {
+            val start = SystemClock.elapsedRealtime()
+            if (queryPilot(light) != null) SystemClock.elapsedRealtime() - start else 500L
+        }.sorted()[2]
     }
 
     suspend fun snapshot(lights: List<WizLight>): Map<String, JSONObject> = withContext(Dispatchers.IO) {

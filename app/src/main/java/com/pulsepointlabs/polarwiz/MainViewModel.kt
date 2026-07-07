@@ -7,12 +7,14 @@ import android.os.SystemClock
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import com.pulsepointlabs.polarwiz.ble.PolarH10Manager
+import com.pulsepointlabs.polarwiz.ble.PolarPrecisionManager
 import com.pulsepointlabs.polarwiz.hr.HeartRateProcessor
 import com.pulsepointlabs.polarwiz.model.HrZone
 import com.pulsepointlabs.polarwiz.model.PolarDevice
 import com.pulsepointlabs.polarwiz.model.Rgb
 import com.pulsepointlabs.polarwiz.model.WizLight
 import com.pulsepointlabs.polarwiz.model.HueLight
+import com.pulsepointlabs.polarwiz.model.PulseShape
 import com.pulsepointlabs.polarwiz.hue.HueBridgeManager
 import com.pulsepointlabs.polarwiz.model.LightingTheme
 import com.pulsepointlabs.polarwiz.wiz.WizLanManager
@@ -30,6 +32,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlin.math.sin
 import java.net.InetAddress
+import java.util.Calendar
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -50,6 +53,15 @@ data class UiState(
     val heartbeatPulseEnabled: Boolean = false,
     val heartbeatPulseIntensity: Int = 8,
     val lowLatencyMode: Boolean = true,
+    val precisionMode: Boolean = false,
+    val precisionStatus: String = "Standard RR timing",
+    val pulseShape: PulseShape = PulseShape.SINGLE,
+    val wizTimingOffsetMs: Int = 0,
+    val hueTimingOffsetMs: Int = 0,
+    val chestMotion: Float = 0f,
+    val rPeakCount: Long = 0,
+    val signalStatus: String = "Waiting for heart signal",
+    val circadianEnabled: Boolean = false,
     val sleepAutomationEnabled: Boolean = false,
     val restoreLightsOnWake: Boolean = true,
     val sleepStatus: String = "Awake",
@@ -65,6 +77,7 @@ data class UiState(
 class LightingRuntime(private val application: Application) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val polar = PolarH10Manager(application, scope)
+    private val precision = PolarPrecisionManager(application, scope)
     private val wiz = WizLanManager(application)
     private val processor = HeartRateProcessor()
     private val preferences = application.getSharedPreferences("polar_wiz_preferences", 0)
@@ -83,6 +96,11 @@ class LightingRuntime(private val application: Application) {
             heartbeatPulseEnabled = preferences.getBoolean("heartbeat_pulse_enabled", false),
             heartbeatPulseIntensity = preferences.getInt("heartbeat_pulse_intensity", 8).coerceIn(2, 40),
             lowLatencyMode = preferences.getBoolean("low_latency_mode", true),
+            precisionMode = preferences.getBoolean("precision_mode", false),
+            pulseShape = runCatching { PulseShape.valueOf(preferences.getString("pulse_shape", PulseShape.SINGLE.name)!!) }.getOrDefault(PulseShape.SINGLE),
+            wizTimingOffsetMs = preferences.getInt("wiz_timing_offset", 0).coerceIn(0, 300),
+            hueTimingOffsetMs = preferences.getInt("hue_timing_offset", 0).coerceIn(0, 300),
+            circadianEnabled = preferences.getBoolean("circadian_enabled", false),
             sleepAutomationEnabled = preferences.getBoolean("sleep_automation_enabled", false),
             restoreLightsOnWake = preferences.getBoolean("restore_lights_on_wake", true),
             groups = restoredGroups,
@@ -98,10 +116,16 @@ class LightingRuntime(private val application: Application) {
     private var huePulseJob: Job? = null
     private var healthJob: Job? = null
     private var sleepEvaluationJob: Job? = null
+    private var watchdogJob: Job? = null
+    private var circadianJob: Job? = null
     private var lastSentZone: HrZone? = null
     private var lastCommandAt = 0L
     private var polarSessionActive = false
     @Volatile private var lastSarahVsSampleAt = 0L
+    @Volatile private var lastHeartDataAt = 0L
+    @Volatile private var lastRPeakAt = 0L
+    @Volatile private var precisionConnectStartedAt = 0L
+    private var precisionFallbackAttempted = false
     private var previousLightStates: Map<String, JSONObject> = emptyMap()
     private var preSleepLightStates: Map<String, JSONObject> = emptyMap()
     private var preSleepHueStates: Map<String, JSONObject> = emptyMap()
@@ -116,6 +140,19 @@ class LightingRuntime(private val application: Application) {
         scope.launch { polar.errors.collect { setError(it) } }
         scope.launch { polar.readings.collect { (bpm, rr) ->
             if (!_ui.value.demoEnabled && System.currentTimeMillis() - lastSarahVsSampleAt > SARAHVS_FEED_TIMEOUT_MS) acceptBpm(bpm, rr)
+        } }
+        scope.launch { precision.status.collect { _ui.value = _ui.value.copy(polarStatus = it, precisionStatus = it) } }
+        scope.launch { precision.errors.collect { DiagnosticLog.add(TAG, "Precision stream: $it"); _ui.value = _ui.value.copy(precisionStatus = "ECG fallback: $it") } }
+        scope.launch { precision.readings.collect { (bpm, rr) -> if (_ui.value.precisionMode && !_ui.value.demoEnabled) acceptBpm(bpm, rr) } }
+        scope.launch { precision.chestMotion.collect { motion ->
+            if (_ui.value.precisionMode) { _ui.value = _ui.value.copy(chestMotion = motion); acceptMotion(motion) }
+        } }
+        scope.launch { precision.rPeaks.collect {
+            if (_ui.value.precisionMode) {
+                lastRPeakAt = System.currentTimeMillis()
+                _ui.value = _ui.value.copy(rPeakCount = _ui.value.rPeakCount + 1, precisionStatus = "ECG R-wave live")
+                fireHeartbeatPulse(_ui.value, _ui.value.pulseShape.durationMs)
+            }
         } }
         if (_ui.value.automationEnabled) updateBackgroundService()
         if (_ui.value.heartbeatPulseEnabled) setHeartbeatPulse(true)
@@ -152,6 +189,28 @@ class LightingRuntime(private val application: Application) {
                 }
             }
         }
+        watchdogJob = scope.launch {
+            while (true) {
+                delay(2_000)
+                val age = System.currentTimeMillis() - lastHeartDataAt
+                val signal = when {
+                    lastHeartDataAt == 0L -> "Waiting for heart signal"
+                    age < 3_000 -> if (_ui.value.precisionMode && System.currentTimeMillis() - lastRPeakAt < 2_000) "ECG R-wave signal healthy" else "HR/RR signal healthy"
+                    age < 8_000 -> "Heart signal delayed (${age / 1000}s)"
+                    else -> "Heart signal lost — lighting held safely"
+                }
+                _ui.value = _ui.value.copy(signalStatus = signal)
+                if (_ui.value.precisionMode && !precisionFallbackAttempted && precisionConnectStartedAt > 0 &&
+                    System.currentTimeMillis() - precisionConnectStartedAt > 12_000 && lastHeartDataAt < precisionConnectStartedAt
+                ) {
+                    precisionFallbackAttempted = true
+                    preferences.edit().putBoolean("precision_mode", false).apply()
+                    _ui.value = _ui.value.copy(precisionMode = false, precisionStatus = "ECG unavailable — standard BLE fallback")
+                    preferences.getString("last_h10_address", null)?.let(::connectPolar)
+                }
+            }
+        }
+        startCircadianLoop()
     }
 
     fun scanPolar() = polar.scan()
@@ -159,12 +218,23 @@ class LightingRuntime(private val application: Application) {
         preferences.edit().putString("last_h10_address", id).apply()
         polarSessionActive = true
         updateBackgroundService()
-        polar.connect(id)
+        if (_ui.value.precisionMode) {
+            precisionConnectStartedAt = System.currentTimeMillis(); precisionFallbackAttempted = false
+            polar.disconnect(); precision.connect(id)
+        }
+        else { precision.disconnect(); polar.connect(id) }
     }
     fun disconnectPolar() {
         polarSessionActive = false
         polar.disconnect()
+        precision.disconnect()
         updateBackgroundService()
+    }
+
+    fun setPrecisionMode(enabled: Boolean) {
+        preferences.edit().putBoolean("precision_mode", enabled).apply()
+        _ui.value = _ui.value.copy(precisionMode = enabled, precisionStatus = if (enabled) "ECG mode reconnecting…" else "Standard RR timing")
+        preferences.getString("last_h10_address", null)?.let(::connectPolar)
     }
 
     fun discoverLights(silentRefresh: Boolean = false) {
@@ -437,7 +507,8 @@ class LightingRuntime(private val application: Application) {
                 while (true) {
                     val state = _ui.value
                     val bpm = state.smoothedBpm
-                    if (state.automationEnabled && !state.automationPaused && sleepDetector.state != SleepWakeDetector.State.SLEEPING && bpm != null && (selectedLights().isNotEmpty() || selectedHueLights().isNotEmpty())) {
+                    val ecgDriving = state.precisionMode && System.currentTimeMillis() - lastRPeakAt < 2_000
+                    if (!ecgDriving && System.currentTimeMillis() - lastHeartDataAt < 8_000 && state.automationEnabled && !state.automationPaused && sleepDetector.state != SleepWakeDetector.State.SLEEPING && bpm != null && (selectedLights().isNotEmpty() || selectedHueLights().isNotEmpty())) {
                         val rawInterval = (state.rrMs?.toLong()?.coerceIn(300L, 2_000L)
                             ?: (60_000L / bpm.coerceIn(40, 200))).coerceAtLeast(300L).toDouble()
                         smoothedIntervalMs = smoothedIntervalMs?.let { previous -> previous * 0.72 + rawInterval * 0.28 } ?: rawInterval
@@ -446,30 +517,7 @@ class LightingRuntime(private val application: Application) {
                         if (nextBeatAt < now - intervalMs || nextBeatAt > now + intervalMs * 2) nextBeatAt = now
                         if (nextBeatAt > now) delay(nextBeatAt - now)
                         nextBeatAt += intervalMs
-                        val durationMs = (intervalMs / 3).toInt().coerceIn(100, 220)
-                        val zone = state.zone
-                        val baseStyle = zone?.let { state.lightingTheme.styleFor(it) }
-                        val baseBrightness = state.brightnessOverride ?: baseStyle?.brightness ?: 60
-                        val heartbeatColor = zone?.let { state.lightingTheme.heartbeatColor(it) }
-                        val wizLights = selectedLights()
-                        if (wizLights.isNotEmpty() && wizPulseJob?.isActive != true) wizPulseJob = scope.launch {
-                            val result = if (heartbeatColor != null) {
-                                wiz.colorPulse(wizLights, heartbeatColor, baseBrightness, state.heartbeatPulseIntensity, durationMs, baseStyle?.temperature ?: 5000)
-                            } else wiz.pulse(wizLights, delta = -state.heartbeatPulseIntensity, durationMs = durationMs)
-                            result.onFailure { error -> Log.w(TAG, "WiZ heartbeat pulse skipped: ${error.message}") }
-                        }
-                        val hueLights = selectedHueLights()
-                        hueCredentials()?.takeIf { hueLights.isNotEmpty() && huePulseJob?.isActive != true }?.let { (ip, key) ->
-                            huePulseJob = scope.launch {
-                                val result = if (heartbeatColor != null) {
-                                    hue.colorPulse(ip, key, hueLights, heartbeatColor, baseBrightness, state.heartbeatPulseIntensity, durationMs, baseStyle?.temperature ?: 5000)
-                                } else hue.pulse(ip, key, hueLights, baseBrightness, state.heartbeatPulseIntensity, durationMs)
-                                result.onFailure { error ->
-                                    Log.w(TAG, "Hue heartbeat pulse skipped: ${error.message}")
-                                    DiagnosticLog.add(TAG, "Hue pulse failed: ${error.message}")
-                                }
-                            }
-                        }
+                        fireHeartbeatPulse(state, state.pulseShape.durationMs)
                     } else {
                         nextBeatAt = SystemClock.elapsedRealtime()
                         smoothedIntervalMs = null
@@ -477,6 +525,57 @@ class LightingRuntime(private val application: Application) {
                     }
                 }
             }
+        }
+    }
+
+    private fun fireHeartbeatPulse(state: UiState, durationMs: Int) {
+        if (!state.heartbeatPulseEnabled || !state.automationEnabled || state.automationPaused || sleepDetector.state == SleepWakeDetector.State.SLEEPING) return
+        val zone = state.zone
+        val baseStyle = zone?.let { state.lightingTheme.styleFor(it) }
+        val baseBrightness = state.brightnessOverride ?: baseStyle?.brightness ?: 60
+        val heartbeatColor = zone?.let { state.lightingTheme.heartbeatColor(it) }
+        val wizLights = selectedLights()
+        if (wizLights.isNotEmpty() && wizPulseJob?.isActive != true) wizPulseJob = scope.launch {
+            delay(state.wizTimingOffsetMs.toLong())
+            suspend fun beat() = if (heartbeatColor != null) wiz.colorPulse(wizLights, heartbeatColor, baseBrightness, state.heartbeatPulseIntensity, durationMs, baseStyle?.temperature ?: 5000)
+                else wiz.pulse(wizLights, -state.heartbeatPulseIntensity, durationMs)
+            beat().onFailure { Log.w(TAG, "WiZ heartbeat pulse skipped: ${it.message}") }
+            if (state.pulseShape == PulseShape.LUB_DUB) { delay(110); beat() }
+        }
+        val hueLights = selectedHueLights()
+        hueCredentials()?.takeIf { hueLights.isNotEmpty() && huePulseJob?.isActive != true }?.let { (ip, key) ->
+            huePulseJob = scope.launch {
+                delay(state.hueTimingOffsetMs.toLong())
+                suspend fun beat() = if (heartbeatColor != null) hue.colorPulse(ip, key, hueLights, heartbeatColor, baseBrightness, state.heartbeatPulseIntensity, durationMs, baseStyle?.temperature ?: 5000)
+                    else hue.pulse(ip, key, hueLights, baseBrightness, state.heartbeatPulseIntensity, durationMs)
+                beat().onFailure { DiagnosticLog.add(TAG, "Hue pulse failed: ${it.message}") }
+                if (state.pulseShape == PulseShape.LUB_DUB) { delay(110); beat() }
+            }
+        }
+    }
+
+    fun setPulseShape(shape: PulseShape) { preferences.edit().putString("pulse_shape", shape.name).apply(); _ui.value = _ui.value.copy(pulseShape = shape) }
+    fun setTimingOffsets(wizMs: Int? = null, hueMs: Int? = null) {
+        val wizValue = wizMs?.coerceIn(0, 300) ?: _ui.value.wizTimingOffsetMs
+        val hueValue = hueMs?.coerceIn(0, 300) ?: _ui.value.hueTimingOffsetMs
+        preferences.edit().putInt("wiz_timing_offset", wizValue).putInt("hue_timing_offset", hueValue).apply()
+        _ui.value = _ui.value.copy(wizTimingOffsetMs = wizValue, hueTimingOffsetMs = hueValue)
+    }
+
+    fun autoCalibrateTiming() {
+        val wizLight = selectedLights().firstOrNull()
+        val hueLight = selectedHueLights().firstOrNull()
+        if (wizLight == null || hueLight == null) return setError("Select at least one online WiZ and Hue light for calibration")
+        val credentials = hueCredentials() ?: return setError("Pair the Hue Bridge first")
+        scope.launch {
+            _ui.value = _ui.value.copy(lastCommand = "Measuring WiZ and Hue latency…", error = null)
+            val wizRtt = wiz.measureLatency(wizLight)
+            val hueRtt = hue.measureLatency(credentials.first, credentials.second, hueLight)
+            val wizDelay = ((hueRtt - wizRtt) / 2).coerceIn(0, 300).toInt()
+            val hueDelay = ((wizRtt - hueRtt) / 2).coerceIn(0, 300).toInt()
+            setTimingOffsets(wizDelay, hueDelay)
+            _ui.value = _ui.value.copy(lastCommand = "Calibrated: WiZ ${wizRtt}ms RTT, Hue ${hueRtt}ms RTT")
+            DiagnosticLog.add(TAG, "Auto calibration WiZ=$wizRtt ms Hue=$hueRtt ms offsets=$wizDelay/$hueDelay")
         }
     }
 
@@ -517,6 +616,37 @@ class LightingRuntime(private val application: Application) {
     fun setRestoreLightsOnWake(enabled: Boolean) {
         preferences.edit().putBoolean("restore_lights_on_wake", enabled).apply()
         _ui.value = _ui.value.copy(restoreLightsOnWake = enabled)
+    }
+
+    fun setCircadianEnabled(enabled: Boolean) {
+        preferences.edit().putBoolean("circadian_enabled", enabled).apply()
+        _ui.value = _ui.value.copy(circadianEnabled = enabled)
+        if (enabled) applyCircadianNow()
+    }
+
+    private fun startCircadianLoop() {
+        circadianJob?.cancel()
+        circadianJob = scope.launch { while (true) { if (_ui.value.circadianEnabled) applyCircadianNow(); delay(5 * 60_000L) } }
+    }
+
+    private fun applyCircadianNow() {
+        if (_ui.value.automationEnabled || sleepDetector.state == SleepWakeDetector.State.SLEEPING) return
+        val calendar = Calendar.getInstance()
+        val hour = calendar.get(Calendar.HOUR_OF_DAY)
+        val minute = calendar.get(Calendar.MINUTE)
+        val (temperature, brightness) = when {
+            hour >= 22 || hour < 6 -> 2400 to 25
+            hour == 6 -> 3200 to (30 + minute * 40 / 59)
+            hour < 9 -> 5000 to 80
+            hour < 17 -> 5500 to 90
+            hour < 20 -> 4000 to 70
+            else -> 3000 to 45
+        }
+        scope.launch {
+            selectedLights().takeIf { it.isNotEmpty() }?.let { wiz.setColor(it, null, brightness, temperature) }
+            hueCredentials()?.let { (ip, key) -> hue.setColor(ip, key, selectedHueLights(), null, brightness, temperature) }
+            _ui.value = _ui.value.copy(lastCommand = "Circadian: ${temperature}K at $brightness%")
+        }
     }
 
     private fun startSleepDetection() {
@@ -645,6 +775,7 @@ class LightingRuntime(private val application: Application) {
     }
 
     private fun acceptBpm(bpm: Int, rr: Int?) {
+        lastHeartDataAt = System.currentTimeMillis()
         val smooth = processor.add(bpm)
         val zone = processor.zoneFor(smooth)
         _ui.value = _ui.value.copy(bpm = bpm, smoothedBpm = smooth, rrMs = rr, zone = zone)
@@ -762,8 +893,11 @@ class LightingRuntime(private val application: Application) {
         wizPulseJob?.cancel()
         huePulseJob?.cancel()
         healthJob?.cancel()
+        watchdogJob?.cancel()
+        circadianJob?.cancel()
         stopSleepDetection()
         polar.close()
+        precision.shutdown()
         wiz.close()
         application.stopService(Intent(application, AutomationKeepAliveService::class.java))
         scope.cancel()
@@ -806,6 +940,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setHeartbeatPulse(enabled: Boolean) = runtime.setHeartbeatPulse(enabled)
     fun setHeartbeatPulseIntensity(intensity: Int) = runtime.setHeartbeatPulseIntensity(intensity)
     fun setLowLatencyMode(enabled: Boolean) = runtime.setLowLatencyMode(enabled)
+    fun setPrecisionMode(enabled: Boolean) = runtime.setPrecisionMode(enabled)
+    fun setPulseShape(shape: PulseShape) = runtime.setPulseShape(shape)
+    fun setTimingOffsets(wizMs: Int? = null, hueMs: Int? = null) = runtime.setTimingOffsets(wizMs, hueMs)
+    fun autoCalibrateTiming() = runtime.autoCalibrateTiming()
+    fun setCircadianEnabled(enabled: Boolean) = runtime.setCircadianEnabled(enabled)
     fun setSleepAutomation(enabled: Boolean) = runtime.setSleepAutomation(enabled)
     fun setRestoreLightsOnWake(enabled: Boolean) = runtime.setRestoreLightsOnWake(enabled)
     fun setDemo(enabled: Boolean) = runtime.setDemo(enabled)

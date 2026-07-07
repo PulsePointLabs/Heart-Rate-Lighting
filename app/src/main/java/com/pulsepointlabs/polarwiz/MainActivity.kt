@@ -25,6 +25,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.pulsepointlabs.polarwiz.databinding.ActivityMainBinding
 import com.pulsepointlabs.polarwiz.model.Rgb
 import com.pulsepointlabs.polarwiz.model.LightingTheme
+import com.pulsepointlabs.polarwiz.model.PulseShape
 import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
@@ -63,6 +64,8 @@ class MainActivity : AppCompatActivity() {
         }
         binding.heartbeatPulseSwitch.setOnCheckedChangeListener { _, checked -> viewModel.setHeartbeatPulse(checked) }
         binding.lowLatencySwitch.setOnCheckedChangeListener { _, checked -> viewModel.setLowLatencyMode(checked) }
+        binding.precisionModeSwitch.setOnCheckedChangeListener { _, checked -> viewModel.setPrecisionMode(checked) }
+        binding.circadianSwitch.setOnCheckedChangeListener { _, checked -> viewModel.setCircadianEnabled(checked) }
         binding.sleepAutomationSwitch.setOnCheckedChangeListener { _, checked ->
             if (checked) requestNotificationPermissionIfNeeded()
             viewModel.setSleepAutomation(checked)
@@ -107,6 +110,15 @@ class MainActivity : AppCompatActivity() {
             }
             override fun onNothingSelected(parent: AdapterView<*>?) = Unit
         }
+        binding.pulseShapeSpinner.adapter = ArrayAdapter(this, R.layout.spinner_theme_item, PulseShape.entries.map { it.displayName })
+            .apply { setDropDownViewResource(R.layout.spinner_theme_dropdown_item) }
+        binding.pulseShapeSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: android.view.View?, position: Int, id: Long) = viewModel.setPulseShape(PulseShape.entries[position])
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+        binding.wizOffsetSeek.setOnSeekBarChangeListener(offsetListener(true))
+        binding.hueOffsetSeek.setOnSeekBarChangeListener(offsetListener(false))
+        binding.autoCalibrateButton.setOnClickListener { viewModel.autoCalibrateTiming() }
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -138,6 +150,15 @@ class MainActivity : AppCompatActivity() {
         if (automationSwitch.isChecked != state.automationEnabled) automationSwitch.isChecked = state.automationEnabled
         if (heartbeatPulseSwitch.isChecked != state.heartbeatPulseEnabled) heartbeatPulseSwitch.isChecked = state.heartbeatPulseEnabled
         if (lowLatencySwitch.isChecked != state.lowLatencyMode) lowLatencySwitch.isChecked = state.lowLatencyMode
+        if (precisionModeSwitch.isChecked != state.precisionMode) precisionModeSwitch.isChecked = state.precisionMode
+        if (circadianSwitch.isChecked != state.circadianEnabled) circadianSwitch.isChecked = state.circadianEnabled
+        precisionStatusText.text = "${state.precisionStatus}  •  R peaks ${state.rPeakCount}  •  motion ${"%.2f".format(state.chestMotion)}g"
+        signalStatusText.text = "Signal: ${state.signalStatus}"
+        if (pulseShapeSpinner.selectedItemPosition != PulseShape.entries.indexOf(state.pulseShape)) pulseShapeSpinner.setSelection(PulseShape.entries.indexOf(state.pulseShape))
+        if (!wizOffsetSeek.isPressed) wizOffsetSeek.progress = state.wizTimingOffsetMs
+        if (!hueOffsetSeek.isPressed) hueOffsetSeek.progress = state.hueTimingOffsetMs
+        wizOffsetLabel.text = "WiZ timing delay: ${state.wizTimingOffsetMs} ms"
+        hueOffsetLabel.text = "Hue timing delay: ${state.hueTimingOffsetMs} ms"
         if (sleepAutomationSwitch.isChecked != state.sleepAutomationEnabled) sleepAutomationSwitch.isChecked = state.sleepAutomationEnabled
         if (restoreOnWakeSwitch.isChecked != state.restoreLightsOnWake) restoreOnWakeSwitch.isChecked = state.restoreLightsOnWake
         restoreOnWakeSwitch.isEnabled = state.sleepAutomationEnabled
@@ -262,6 +283,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun brightness() = binding.brightnessSeek.progress.coerceAtLeast(10)
+    private fun offsetListener(wiz: Boolean) = object : SeekBar.OnSeekBarChangeListener {
+        override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+            if (fromUser) (if (wiz) binding.wizOffsetLabel else binding.hueOffsetLabel).text = "${if (wiz) "WiZ" else "Hue"} timing delay: $progress ms"
+        }
+        override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+        override fun onStopTrackingTouch(seekBar: SeekBar?) { if (wiz) viewModel.setTimingOffsets(wizMs = seekBar?.progress) else viewModel.setTimingOffsets(hueMs = seekBar?.progress) }
+    }
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 
     private fun requestNotificationPermissionIfNeeded() {

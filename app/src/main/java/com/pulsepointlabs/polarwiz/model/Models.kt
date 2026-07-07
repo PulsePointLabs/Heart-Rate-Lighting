@@ -32,6 +32,10 @@ enum class HrZone(val label: String, val min: Int, val color: Rgb?, val temperat
 }
 
 data class LightStyle(val color: Rgb?, val temperature: Int?, val brightness: Int)
+enum class PulseShape(val displayName: String, val durationMs: Int) {
+    SINGLE("Single beat", 150), LUB_DUB("Lub-dub double beat", 105),
+    SOFT_SWELL("Soft swell", 280), SHARP_ECG("Sharp ECG flash", 80)
+}
 
 enum class LightingTheme(val displayName: String) {
     PULSE("Pulse — lavender to red"),

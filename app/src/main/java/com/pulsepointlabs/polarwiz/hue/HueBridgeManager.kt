@@ -19,6 +19,7 @@ import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
 import kotlin.math.pow
+import android.os.SystemClock
 
 class HueBridgeManager {
     private val groupMutex = Mutex()
@@ -102,6 +103,14 @@ class HueBridgeManager {
             val state = JSONObject(request(ip, "/api/$key/lights/${light.id}")).getJSONObject("state")
             put(light.id, JSONObject().apply { listOf("on", "bri", "xy", "ct", "hue", "sat", "effect").forEach { if (state.has(it)) put(it, state.get(it)) } })
         } } }
+    }
+    suspend fun measureLatency(ip: String, key: String, light: HueLight): Long = withContext(Dispatchers.IO) {
+        List(5) {
+            val start = SystemClock.elapsedRealtime()
+            runCatching { request(ip, "/api/$key/lights/${light.id}") }.fold(
+                onSuccess = { SystemClock.elapsedRealtime() - start }, onFailure = { 750L }
+            )
+        }.sorted()[2]
     }
     suspend fun restore(ip: String, key: String, states: Map<String, JSONObject>): Result<Unit> = withContext(Dispatchers.IO) { runCatching {
         states.forEach { (id, state) -> validateCommandResponse(request(ip, "/api/$key/lights/$id/state", "PUT", state.put("transitiontime", 6)), id) }

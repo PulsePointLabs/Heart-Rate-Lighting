@@ -76,6 +76,15 @@ Enable **Sleep / wake light automation** to combine the phone accelerometer with
 
 Sleep detection remains best-effort because Android manufacturers differ in how continuously they deliver ordinary accelerometer events with the screen off. The app runs its existing foreground service and also uses the low-power significant-motion wake sensor when the phone provides one. Keep the phone on the mattress or stable bedside surface where movement can be measured; aggressive battery restrictions may still need to be disabled for overnight use.
 
+## Precision and automation controls
+
+- **ECG R-wave precision mode** uses the official Polar BLE SDK to stream H10 ECG at 130 Hz, detects R peaks locally, and feeds H10 chest accelerometer motion into sleep/wake detection. If ECG streaming stalls, RR prediction resumes; if the precision connection produces no heart data, the app reconnects through standard BLE automatically.
+- **Heartbeat shape** offers single beat, lub-dub, soft swell, and sharp ECG flash envelopes.
+- **Auto-calibrate WiZ / Hue timing** measures median LAN round-trip time and delays the faster lighting path. Separate 0–300 ms sliders allow visual fine tuning afterward.
+- **Circadian daylight schedule** applies 2400 K/25% overnight, a gradual 06:00 sunrise, bright daylight through the day, and progressively warmer evening light whenever HR automation is off.
+- The foreground notification includes **Pause/Resume** and **Lights off** actions. Android's Quick Settings editor can add the **HR Lights** tile for one-tap automation control.
+- The **signal watchdog** reports healthy, delayed, or lost HR/ECG state, stops free-running pulses after eight seconds without heart data, and records failures in Diagnostics.
+
 Connecting the H10 or enabling automation starts a foreground `connectedDevice` service. Its persistent notification keeps the BLE GATT session, zone mapping, and heartbeat pulses running when the screen locks or another app is in front. Explicitly disconnect the H10 and disable automation to stop the service. Android 13+ may ask for notification permission; declining hides the drawer notification but does not prevent the foreground service from running.
 
 ## Permissions by Android version
@@ -107,6 +116,7 @@ Connecting the H10 or enabling automation starts a foreground `connectedDevice` 
 ## Dependencies
 
 - AndroidX Core, AppCompat, Activity, Lifecycle ViewModel/Runtime
+- Official Polar BLE SDK 7.0.1 for optional ECG and H10 accelerometer streaming
 - Kotlin coroutines Android
 - JUnit 4 for local tests
 

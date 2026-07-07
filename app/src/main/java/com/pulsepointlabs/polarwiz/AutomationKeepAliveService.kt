@@ -26,10 +26,19 @@ class AutomationKeepAliveService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val runtime = (application as PolarWizApplication).runtime
+        when (intent?.action) {
+            ACTION_PAUSE -> runtime.setAutomationPaused(!runtime.ui.value.automationPaused)
+            ACTION_OFF -> runtime.turnOff()
+        }
         val openApp = PendingIntent.getActivity(
             this,
             0,
             Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        fun serviceAction(action: String, requestCode: Int) = PendingIntent.getService(
+            this, requestCode, Intent(this, AutomationKeepAliveService::class.java).setAction(action),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
@@ -40,6 +49,8 @@ class AutomationKeepAliveService : Service() {
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .addAction(0, if (runtime.ui.value.automationPaused) "Resume" else "Pause", serviceAction(ACTION_PAUSE, 1))
+            .addAction(0, "Lights off", serviceAction(ACTION_OFF, 2))
             .build()
         ServiceCompat.startForeground(
             this,
@@ -55,5 +66,7 @@ class AutomationKeepAliveService : Service() {
     companion object {
         private const val CHANNEL_ID = "polar_wiz_background"
         private const val NOTIFICATION_ID = 1001
+        const val ACTION_PAUSE = "com.pulsepointlabs.polarwiz.PAUSE"
+        const val ACTION_OFF = "com.pulsepointlabs.polarwiz.OFF"
     }
 }
