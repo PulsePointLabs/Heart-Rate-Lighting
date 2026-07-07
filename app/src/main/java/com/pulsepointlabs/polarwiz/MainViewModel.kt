@@ -105,7 +105,8 @@ class LightingRuntime(private val application: Application) {
             restoreLightsOnWake = preferences.getBoolean("restore_lights_on_wake", true),
             groups = restoredGroups,
             activeGroup = preferences.getString("active_group", "All lights")
-                ?.takeIf { it in restoredGroups } ?: "All lights"
+                ?.takeIf { it in restoredGroups } ?: "All lights",
+            error = preferences.getString("last_fatal_crash", null)?.let { "Previous crash captured — share Diagnostics" }
         )
     )
     val ui: StateFlow<UiState> = _ui.asStateFlow()
@@ -242,6 +243,7 @@ class LightingRuntime(private val application: Application) {
     fun setPrecisionMode(enabled: Boolean) {
         preferences.edit().putBoolean("precision_mode", false).apply()
         _ui.value = _ui.value.copy(precisionMode = enabled, precisionStatus = if (enabled) "ECG mode reconnecting…" else "Standard RR timing")
+        if (enabled) preferences.edit().remove("last_fatal_crash").apply()
         preferences.getString("last_h10_address", null)?.let(::connectPolar)
     }
 
