@@ -116,7 +116,7 @@ Connecting the H10 or enabling automation starts a foreground `connectedDevice` 
 ## Dependencies
 
 - AndroidX Core, AppCompat, Activity, Lifecycle ViewModel/Runtime
-- Official Polar BLE SDK 7.0.1 for optional ECG and H10 accelerometer streaming
+- Official Polar BLE SDK pinned to commit `ccff681` for optional ECG and H10 accelerometer streaming; this includes the upstream guard for missing HR-service notifications that was absent in 7.0.1
 - Kotlin coroutines Android
 - JUnit 4 for local tests
 

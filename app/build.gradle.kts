@@ -11,8 +11,8 @@ android {
         applicationId = "com.pulsepointlabs.polarwiz"
         minSdk = 33
         targetSdk = 35
-        versionCode = 23
-        versionName = "1.0.2"
+        versionCode = 24
+        versionName = "1.0.3"
     }
 
     buildFeatures { viewBinding = true }
@@ -30,6 +30,6 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.9.4")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.9.4")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
-    implementation("com.github.polarofficial:polar-ble-sdk:7.0.1")
+    implementation("com.github.polarofficial:polar-ble-sdk:ccff681")
     testImplementation("junit:junit:4.13.2")
 }

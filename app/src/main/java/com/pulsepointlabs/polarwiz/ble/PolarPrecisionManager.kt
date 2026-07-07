@@ -31,7 +31,6 @@ class PolarPrecisionManager(context: Context, private val scope: CoroutineScope)
     private var deviceId: String? = null
     private var ecgJob: Job? = null
     private var accJob: Job? = null
-    private var hrJob: Job? = null
     private val crashBoundary = CoroutineExceptionHandler { _, error -> fail(error) }
     private val api = PolarBleApiDefaultImpl.defaultImplementation(
         context.applicationContext,
@@ -65,11 +64,6 @@ class PolarPrecisionManager(context: Context, private val scope: CoroutineScope)
     private fun startStreams(identifier: String) {
         stopJobs()
         status.value = "ECG + chest motion streaming"
-        hrJob = scope.launch(crashBoundary) {
-            try { api.startHrStreaming(identifier).collect { data ->
-                data.samples.forEach { sample -> readings.tryEmit(sample.hr to sample.rrsMs.lastOrNull()) }
-            } } catch (cancelled: CancellationException) { throw cancelled } catch (error: Throwable) { fail(error) }
-        }
         ecgJob = scope.launch(crashBoundary) {
             try {
                 val settings = api.requestStreamSettings(identifier, PolarBleApi.PolarDeviceDataType.ECG)
@@ -95,7 +89,7 @@ class PolarPrecisionManager(context: Context, private val scope: CoroutineScope)
         DiagnosticLog.add(TAG, "ECG and accelerometer streams started")
     }
 
-    private fun stopJobs() { hrJob?.cancel(); ecgJob?.cancel(); accJob?.cancel(); hrJob = null; ecgJob = null; accJob = null }
+    private fun stopJobs() { ecgJob?.cancel(); accJob?.cancel(); ecgJob = null; accJob = null }
     private fun closeConnection() { stopJobs(); deviceId?.let { runCatching { api.disconnectFromDevice(it) } }; deviceId = null }
     fun shutdown() { closeConnection(); api.shutDown() }
     private fun fail(error: Throwable) { val message = error.message ?: error.javaClass.simpleName; errors.tryEmit(message); DiagnosticLog.add(TAG, message) }

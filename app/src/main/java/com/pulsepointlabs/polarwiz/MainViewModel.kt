@@ -125,6 +125,7 @@ class LightingRuntime(private val application: Application) {
     @Volatile private var lastSarahVsSampleAt = 0L
     @Volatile private var lastHeartDataAt = 0L
     @Volatile private var lastRPeakAt = 0L
+    @Volatile private var previousRPeakAt = 0L
     @Volatile private var precisionConnectStartedAt = 0L
     private var precisionFallbackAttempted = false
     private var previousLightStates: Map<String, JSONObject> = emptyMap()
@@ -158,7 +159,11 @@ class LightingRuntime(private val application: Application) {
         } }
         scope.launch { precision.rPeaks.collect {
             if (_ui.value.precisionMode) {
-                lastRPeakAt = System.currentTimeMillis()
+                val now = System.currentTimeMillis()
+                val rr = (now - previousRPeakAt).toInt().takeIf { previousRPeakAt > 0 && it in 300..2_000 }
+                previousRPeakAt = now
+                lastRPeakAt = now
+                rr?.let { acceptBpm((60_000 / it).coerceIn(30, 220), it) }
                 _ui.value = _ui.value.copy(rPeakCount = _ui.value.rPeakCount + 1, precisionStatus = "ECG R-wave live")
                 fireHeartbeatPulse(_ui.value, _ui.value.pulseShape.durationMs)
             }
@@ -229,7 +234,7 @@ class LightingRuntime(private val application: Application) {
         updateBackgroundService()
         if (_ui.value.precisionMode) {
             precisionConnectStartedAt = System.currentTimeMillis(); precisionFallbackAttempted = false
-            polar.disconnect(); scope.launch { delay(750); if (_ui.value.precisionMode) precision.connect(id) }
+            polar.disconnect(); scope.launch { delay(3_000); if (_ui.value.precisionMode) precision.connect(id) }
         }
         else { precision.disconnect(); polar.connect(id) }
     }
@@ -243,7 +248,7 @@ class LightingRuntime(private val application: Application) {
     fun setPrecisionMode(enabled: Boolean) {
         preferences.edit().putBoolean("precision_mode", false).apply()
         _ui.value = _ui.value.copy(precisionMode = enabled, precisionStatus = if (enabled) "ECG mode reconnecting…" else "Standard RR timing")
-        if (enabled) preferences.edit().remove("last_fatal_crash").apply()
+        if (enabled) { previousRPeakAt = 0L; preferences.edit().remove("last_fatal_crash").apply() }
         preferences.getString("last_h10_address", null)?.let(::connectPolar)
     }
 
