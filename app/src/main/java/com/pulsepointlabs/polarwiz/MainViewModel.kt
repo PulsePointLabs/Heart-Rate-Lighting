@@ -123,6 +123,7 @@ class LightingRuntime(private val application: Application) {
     private var lastCommandAt = 0L
     private var polarSessionActive = false
     @Volatile private var lastSarahVsSampleAt = 0L
+    @Volatile private var lastSarahVsRPeakAt = 0L
     @Volatile private var lastHeartDataAt = 0L
     @Volatile private var lastRPeakAt = 0L
     @Volatile private var previousRPeakAt = 0L
@@ -175,8 +176,14 @@ class LightingRuntime(private val application: Application) {
             updateBackgroundService()
         }
         preferences.getString("last_h10_address", null)?.let { address ->
-            _ui.value = _ui.value.copy(polarStatus = "Reconnecting to saved H10…")
-            connectPolar(address)
+            _ui.value = _ui.value.copy(polarStatus = "Waiting briefly for SarahVS HR feed…")
+            scope.launch {
+                delay(SARAHVS_STARTUP_GRACE_MS)
+                if (System.currentTimeMillis() - lastSarahVsSampleAt > SARAHVS_FEED_TIMEOUT_MS) {
+                    _ui.value = _ui.value.copy(polarStatus = "Reconnecting to saved H10…")
+                    connectPolar(address)
+                }
+            }
         }
         if (restoredLights.isNotEmpty()) discoverLights(silentRefresh = true)
         if (hueKey != null) refreshHueLights()
@@ -522,7 +529,8 @@ class LightingRuntime(private val application: Application) {
                 while (true) {
                     val state = _ui.value
                     val bpm = state.smoothedBpm
-                    val ecgDriving = state.precisionMode && System.currentTimeMillis() - lastRPeakAt < 2_000
+                    val ecgDriving = (state.precisionMode && System.currentTimeMillis() - lastRPeakAt < 2_000) ||
+                        System.currentTimeMillis() - lastSarahVsRPeakAt < 2_000
                     if (!ecgDriving && System.currentTimeMillis() - lastHeartDataAt < 8_000 && state.automationEnabled && !state.automationPaused && sleepDetector.state != SleepWakeDetector.State.SLEEPING && bpm != null && (selectedLights().isNotEmpty() || selectedHueLights().isNotEmpty())) {
                         val rawInterval = (state.rrMs?.toLong()?.coerceIn(300L, 2_000L)
                             ?: (60_000L / bpm.coerceIn(40, 200))).coerceAtLeast(300L).toDouble()
@@ -789,6 +797,20 @@ class LightingRuntime(private val application: Application) {
         acceptBpm(bpm, rr)
     }
 
+    fun acceptSarahVsRPeak() {
+        if (_ui.value.demoEnabled) return
+        val now = System.currentTimeMillis()
+        lastSarahVsSampleAt = now
+        lastSarahVsRPeakAt = now
+        lastRPeakAt = now
+        _ui.value = _ui.value.copy(
+            rPeakCount = _ui.value.rPeakCount + 1,
+            polarStatus = "Live ECG/HR shared by SarahVS",
+            precisionStatus = "SarahVS R-wave live"
+        )
+        fireHeartbeatPulse(_ui.value, _ui.value.pulseShape.durationMs)
+    }
+
     private fun acceptBpm(bpm: Int, rr: Int?) {
         lastHeartDataAt = System.currentTimeMillis()
         val smooth = processor.add(bpm)
@@ -922,6 +944,7 @@ class LightingRuntime(private val application: Application) {
         private const val TAG = "PolarWizVM"
         private const val MIN_COMMAND_INTERVAL_MS = 3_000L
         private const val SARAHVS_FEED_TIMEOUT_MS = 6_000L
+        private const val SARAHVS_STARTUP_GRACE_MS = 3_000L
         private val IPV4 = Regex("^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}$")
     }
 }
