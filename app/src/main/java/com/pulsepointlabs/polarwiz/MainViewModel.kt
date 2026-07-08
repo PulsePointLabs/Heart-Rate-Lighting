@@ -125,7 +125,6 @@ class LightingRuntime(private val application: Application) {
     private var lastSentZone: HrZone? = null
     private var lastCommandAt = 0L
     private var polarSessionActive = false
-    @Volatile private var directFallbackAllowed = true
     @Volatile private var lastSarahVsSampleAt = 0L
     @Volatile private var lastSarahVsRPeakAt = 0L
     @Volatile private var lastHeartDataAt = 0L
@@ -180,15 +179,8 @@ class LightingRuntime(private val application: Application) {
             startSleepDetection()
             updateBackgroundService()
         }
-        preferences.getString("last_h10_address", null)?.let { address ->
-            _ui.value = _ui.value.copy(polarStatus = "Waiting briefly for SarahVS HR feed…")
-            scope.launch {
-                delay(SARAHVS_STARTUP_GRACE_MS)
-                if (directFallbackAllowed && System.currentTimeMillis() - lastSarahVsSampleAt > SARAHVS_FEED_TIMEOUT_MS) {
-                    _ui.value = _ui.value.copy(polarStatus = "Reconnecting to saved H10…")
-                    connectPolar(address)
-                }
-            }
+        if (preferences.getString("last_h10_address", null) != null) {
+            _ui.value = _ui.value.copy(polarStatus = "Waiting for SarahVS feed — tap Connect only for direct fallback")
         }
         if (restoredLights.isNotEmpty()) discoverLights(silentRefresh = true)
         if (hueKey != null) refreshHueLights()
@@ -212,9 +204,6 @@ class LightingRuntime(private val application: Application) {
                 if (lastSarahVsSampleAt > 0 && System.currentTimeMillis() - lastSarahVsSampleAt > SARAHVS_FEED_TIMEOUT_MS) {
                     lastSarahVsSampleAt = 0
                     _ui.value = _ui.value.copy(polarStatus = "SarahVS feed stopped — tap Connect for direct H10 fallback")
-                    if (directFallbackAllowed && polarSessionActive) {
-                        preferences.getString("last_h10_address", null)?.let { connectPolar(it) }
-                    }
                 }
             }
         }
@@ -244,7 +233,6 @@ class LightingRuntime(private val application: Application) {
 
     fun scanPolar() = polar.scan()
     fun connectPolar(id: String) {
-        directFallbackAllowed = true
         preferences.edit().putString("last_h10_address", id).apply()
         polarSessionActive = true
         updateBackgroundService()
@@ -255,7 +243,6 @@ class LightingRuntime(private val application: Application) {
         else { precision.disconnect(); polar.connect(id) }
     }
     fun disconnectPolar() {
-        directFallbackAllowed = false
         polarSessionActive = false
         polar.disconnect()
         precision.disconnect()
@@ -800,7 +787,6 @@ class LightingRuntime(private val application: Application) {
         val firstSharedSample = System.currentTimeMillis() - lastSarahVsSampleAt > SARAHVS_FEED_TIMEOUT_MS
         lastSarahVsSampleAt = System.currentTimeMillis()
         if (firstSharedSample) {
-            directFallbackAllowed = false
             polar.disconnect()
             polarSessionActive = false
         }
@@ -983,7 +969,6 @@ class LightingRuntime(private val application: Application) {
         private const val TAG = "PolarWizVM"
         private const val MIN_COMMAND_INTERVAL_MS = 3_000L
         private const val SARAHVS_FEED_TIMEOUT_MS = 6_000L
-        private const val SARAHVS_STARTUP_GRACE_MS = 8_000L
         private const val SARAHVS_UDP_PORT = 48_511
         private val IPV4 = Regex("^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}$")
     }
