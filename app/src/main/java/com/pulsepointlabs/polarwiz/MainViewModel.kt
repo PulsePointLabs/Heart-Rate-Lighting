@@ -32,6 +32,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlin.math.sin
 import java.net.InetAddress
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import java.net.InetSocketAddress
 import java.util.Calendar
 import org.json.JSONArray
 import org.json.JSONObject
@@ -122,6 +125,7 @@ class LightingRuntime(private val application: Application) {
     private var lastSentZone: HrZone? = null
     private var lastCommandAt = 0L
     private var polarSessionActive = false
+    @Volatile private var directFallbackAllowed = true
     @Volatile private var lastSarahVsSampleAt = 0L
     @Volatile private var lastSarahVsRPeakAt = 0L
     @Volatile private var lastHeartDataAt = 0L
@@ -138,6 +142,7 @@ class LightingRuntime(private val application: Application) {
     private val sleepMonitor = SleepWakeMonitor(application, ::acceptMotion, ::acceptSignificantMotion)
 
     init {
+        startSarahVsUdpFeed()
         scope.launch { polar.devices.collect { _ui.value = _ui.value.copy(polarDevices = it) } }
         scope.launch { polar.connectionState.collect { _ui.value = _ui.value.copy(polarStatus = it) } }
         scope.launch { polar.errors.collect { setError(it) } }
@@ -179,7 +184,7 @@ class LightingRuntime(private val application: Application) {
             _ui.value = _ui.value.copy(polarStatus = "Waiting briefly for SarahVS HR feed…")
             scope.launch {
                 delay(SARAHVS_STARTUP_GRACE_MS)
-                if (System.currentTimeMillis() - lastSarahVsSampleAt > SARAHVS_FEED_TIMEOUT_MS) {
+                if (directFallbackAllowed && System.currentTimeMillis() - lastSarahVsSampleAt > SARAHVS_FEED_TIMEOUT_MS) {
                     _ui.value = _ui.value.copy(polarStatus = "Reconnecting to saved H10…")
                     connectPolar(address)
                 }
@@ -206,7 +211,10 @@ class LightingRuntime(private val application: Application) {
                 delay(3_000)
                 if (lastSarahVsSampleAt > 0 && System.currentTimeMillis() - lastSarahVsSampleAt > SARAHVS_FEED_TIMEOUT_MS) {
                     lastSarahVsSampleAt = 0
-                    preferences.getString("last_h10_address", null)?.let { connectPolar(it) }
+                    _ui.value = _ui.value.copy(polarStatus = "SarahVS feed stopped — tap Connect for direct H10 fallback")
+                    if (directFallbackAllowed && polarSessionActive) {
+                        preferences.getString("last_h10_address", null)?.let { connectPolar(it) }
+                    }
                 }
             }
         }
@@ -236,6 +244,7 @@ class LightingRuntime(private val application: Application) {
 
     fun scanPolar() = polar.scan()
     fun connectPolar(id: String) {
+        directFallbackAllowed = true
         preferences.edit().putString("last_h10_address", id).apply()
         polarSessionActive = true
         updateBackgroundService()
@@ -246,6 +255,7 @@ class LightingRuntime(private val application: Application) {
         else { precision.disconnect(); polar.connect(id) }
     }
     fun disconnectPolar() {
+        directFallbackAllowed = false
         polarSessionActive = false
         polar.disconnect()
         precision.disconnect()
@@ -790,11 +800,40 @@ class LightingRuntime(private val application: Application) {
         val firstSharedSample = System.currentTimeMillis() - lastSarahVsSampleAt > SARAHVS_FEED_TIMEOUT_MS
         lastSarahVsSampleAt = System.currentTimeMillis()
         if (firstSharedSample) {
+            directFallbackAllowed = false
             polar.disconnect()
             polarSessionActive = false
         }
         _ui.value = _ui.value.copy(polarStatus = "Live HR shared by SarahVS")
         acceptBpm(bpm, rr)
+    }
+
+    private fun startSarahVsUdpFeed() {
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                DatagramSocket(null).use { socket ->
+                    socket.reuseAddress = true
+                    socket.bind(InetSocketAddress(InetAddress.getLoopbackAddress(), SARAHVS_UDP_PORT))
+                    DiagnosticLog.add(TAG, "SarahVS localhost HR receiver listening")
+                    val buffer = ByteArray(128)
+                    while (true) {
+                        val packet = DatagramPacket(buffer, buffer.size)
+                        socket.receive(packet)
+                        val message = packet.data.decodeToString(packet.offset, packet.offset + packet.length)
+                        val fields = message.split('|')
+                        if (fields.firstOrNull() != "PPHR1") continue
+                        when (fields.getOrNull(1)) {
+                            "HR" -> {
+                                val bpm = fields.getOrNull(2)?.toIntOrNull()
+                                val rr = fields.getOrNull(3)?.toIntOrNull()?.takeIf { it > 0 }
+                                if (bpm != null && bpm in 25..240) acceptSarahVsHeartRate(bpm, rr)
+                            }
+                            "BEAT" -> acceptSarahVsRPeak()
+                        }
+                    }
+                }
+            }.onFailure { DiagnosticLog.add(TAG, "SarahVS localhost HR receiver failed: ${it.message}") }
+        }
     }
 
     fun acceptSarahVsRPeak() {
@@ -944,7 +983,8 @@ class LightingRuntime(private val application: Application) {
         private const val TAG = "PolarWizVM"
         private const val MIN_COMMAND_INTERVAL_MS = 3_000L
         private const val SARAHVS_FEED_TIMEOUT_MS = 6_000L
-        private const val SARAHVS_STARTUP_GRACE_MS = 3_000L
+        private const val SARAHVS_STARTUP_GRACE_MS = 8_000L
+        private const val SARAHVS_UDP_PORT = 48_511
         private val IPV4 = Regex("^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}$")
     }
 }
