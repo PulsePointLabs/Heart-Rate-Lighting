@@ -35,7 +35,10 @@ import java.net.InetAddress
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetSocketAddress
+import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -68,6 +71,7 @@ data class UiState(
     val sleepAutomationEnabled: Boolean = false,
     val restoreLightsOnWake: Boolean = true,
     val sleepStatus: String = "Awake",
+    val sleepHistory: List<String> = emptyList(),
     val automationPaused: Boolean = false,
     val activeGroup: String = "All lights",
     val groups: List<String> = listOf("All lights"),
@@ -106,6 +110,7 @@ class LightingRuntime(private val application: Application) {
             circadianEnabled = preferences.getBoolean("circadian_enabled", false),
             sleepAutomationEnabled = preferences.getBoolean("sleep_automation_enabled", false),
             restoreLightsOnWake = preferences.getBoolean("restore_lights_on_wake", true),
+            sleepHistory = loadSleepHistory(),
             groups = restoredGroups,
             activeGroup = preferences.getString("active_group", "All lights")
                 ?.takeIf { it in restoredGroups } ?: "All lights",
@@ -139,6 +144,7 @@ class LightingRuntime(private val application: Application) {
     private val hueKey get() = preferences.getString("hue_key", null)
     private val sleepDetector = SleepWakeDetector()
     private val sleepMonitor = SleepWakeMonitor(application, ::acceptMotion, ::acceptSignificantMotion)
+    private val sleepHistoryFormat = SimpleDateFormat("MMM d, HH:mm:ss", Locale.US)
 
     init {
         startSarahVsUdpFeed()
@@ -625,8 +631,10 @@ class LightingRuntime(private val application: Application) {
             sleepStatus = if (enabled) "Monitoring motion and heart rate" else "Awake"
         )
         if (enabled) {
+            addSleepHistory("Sleep/wake automation enabled")
             startSleepDetection()
         } else {
+            addSleepHistory("Sleep/wake automation disabled")
             if (wasSleeping) handleSleepEvent(sleepDetector.onSignificantMotion())
             stopSleepDetection(clearSnapshot = !wasSleeping)
         }
@@ -713,6 +721,7 @@ class LightingRuntime(private val application: Application) {
                 val lights = selectedLights()
                 preSleepLightStates = wiz.snapshot(lights)
                 hueCredentials()?.let { (ip, key) -> preSleepHueStates = hue.snapshot(ip, key, selectedHueLights()) }
+                addSleepHistory("Sleep detected — turning selected lights off")
                 if (lights.isNotEmpty()) wiz.turnOff(lights).fold(
                     onSuccess = {
                         _ui.value = _ui.value.copy(sleepStatus = "Sleeping — lights off", lastCommand = "Sleep detected: lights off", error = null)
@@ -728,6 +737,7 @@ class LightingRuntime(private val application: Application) {
             SleepWakeDetector.Event.WAKE -> scope.launch {
                 val state = _ui.value
                 val wizLights = selectedLights()
+                addSleepHistory(if (state.restoreLightsOnWake) "Wake detected — restoring prior light state" else "Wake detected — turning selected lights on")
                 val result = if (state.restoreLightsOnWake && preSleepLightStates.isNotEmpty()) {
                     wiz.restore(state.lights, preSleepLightStates)
                 } else if (wizLights.isEmpty()) {
@@ -763,6 +773,24 @@ class LightingRuntime(private val application: Application) {
             }
             null -> Unit
         }
+    }
+
+    private fun addSleepHistory(message: String) {
+        val stamped = "${sleepHistoryFormat.format(Date())} — $message"
+        val updated = (listOf(stamped) + _ui.value.sleepHistory).take(SLEEP_HISTORY_LIMIT)
+        preferences.edit().putString("sleep_history", JSONArray(updated).toString()).apply()
+        _ui.value = _ui.value.copy(sleepHistory = updated)
+        DiagnosticLog.add(TAG, stamped)
+    }
+
+    private fun loadSleepHistory(): List<String> {
+        val raw = preferences.getString("sleep_history", null) ?: return emptyList()
+        return runCatching {
+            val array = JSONArray(raw)
+            buildList {
+                for (index in 0 until array.length()) add(array.optString(index))
+            }.filter { it.isNotBlank() }.take(SLEEP_HISTORY_LIMIT)
+        }.getOrDefault(emptyList())
     }
 
     fun setDemo(enabled: Boolean) {
@@ -970,6 +998,7 @@ class LightingRuntime(private val application: Application) {
         private const val MIN_COMMAND_INTERVAL_MS = 3_000L
         private const val SARAHVS_FEED_TIMEOUT_MS = 6_000L
         private const val SARAHVS_UDP_PORT = 48_511
+        private const val SLEEP_HISTORY_LIMIT = 20
         private val IPV4 = Regex("^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}$")
     }
 }

@@ -163,6 +163,11 @@ class MainActivity : AppCompatActivity() {
         if (restoreOnWakeSwitch.isChecked != state.restoreLightsOnWake) restoreOnWakeSwitch.isChecked = state.restoreLightsOnWake
         restoreOnWakeSwitch.isEnabled = state.sleepAutomationEnabled
         sleepStatusText.text = "Sleep status: ${state.sleepStatus}"
+        sleepHistoryText.text = if (state.sleepHistory.isEmpty()) {
+            "Sleep/wake history: no events yet"
+        } else {
+            "Sleep/wake history:\n${state.sleepHistory.take(6).joinToString("\n")}"
+        }
         if (!heartbeatIntensitySeek.isPressed && heartbeatIntensitySeek.progress != state.heartbeatPulseIntensity) {
             heartbeatIntensitySeek.progress = state.heartbeatPulseIntensity
         }

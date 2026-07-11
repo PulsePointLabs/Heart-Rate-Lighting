@@ -120,6 +120,9 @@
                 android:layout_width="match_parent" android:layout_height="48dp"
                 android:text="Restore previous light state on wake" android:textColor="@color/text_primary" />
             <TextView android:id="@+id/sleepStatusText" style="@style/BodyText" android:text="Sleep status: Awake" />
+            <TextView android:id="@+id/sleepHistoryText" style="@style/BodyText"
+                android:text="Sleep/wake history: no events yet"
+                android:maxLines="8" android:ellipsize="end" />
             <TextView android:id="@+id/zoneText" style="@style/MetricText" android:text="Zone: --" />
             <TextView android:id="@+id/lastCommandText" style="@style/BodyText" android:text="Last command: none" android:maxLines="3" android:ellipsize="end" />
             <TextView android:id="@+id/errorText" style="@style/BodyText" android:textColor="#FFFCA5A5" android:maxLines="3" android:ellipsize="end" />
