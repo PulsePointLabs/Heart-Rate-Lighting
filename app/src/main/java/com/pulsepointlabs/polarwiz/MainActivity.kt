@@ -360,7 +360,7 @@ class MainActivity : AppCompatActivity() {
     private fun shareDiagnostics() {
         startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
-            putExtra(Intent.EXTRA_SUBJECT, "Polar WiZ HR diagnostics")
+            putExtra(Intent.EXTRA_SUBJECT, "SarahVS Glow diagnostics")
             putExtra(Intent.EXTRA_TEXT, DiagnosticLog.export())
         }, "Share diagnostics"))
     }

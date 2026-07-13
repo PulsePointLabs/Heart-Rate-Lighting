@@ -27,7 +27,7 @@
         android:name=".PolarWizApplication"
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
-        android:label="Polar WiZ HR"
+        android:label="SarahVS Glow"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.PolarWiz">
@@ -46,7 +46,7 @@
             android:name=".AutomationTileService"
             android:exported="true"
             android:icon="@drawable/ic_stat_polar_wiz"
-            android:label="HR Lights"
+            android:label="SarahVS Glow"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
             <intent-filter><action android:name="android.service.quicksettings.action.QS_TILE" /></intent-filter>
         </service>

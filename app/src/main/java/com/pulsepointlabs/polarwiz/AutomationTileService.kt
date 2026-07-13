@@ -14,7 +14,7 @@ class AutomationTileService : TileService() {
     private fun refresh() {
         val state = (application as PolarWizApplication).runtime.ui.value
         qsTile?.apply {
-            label = "HR Lights"
+            label = "SarahVS Glow"
             subtitle = if (state.automationEnabled) "Automation on" else "Automation off"
             this.state = if (state.automationEnabled) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
             updateTile()

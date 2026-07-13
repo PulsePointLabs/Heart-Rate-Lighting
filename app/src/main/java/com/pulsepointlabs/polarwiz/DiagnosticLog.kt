@@ -15,7 +15,7 @@ object DiagnosticLog {
     }
 
     @Synchronized fun export(): String = buildString {
-        appendLine("Polar WiZ HR diagnostics")
+        appendLine("SarahVS Glow diagnostics")
         appendLine("Generated: ${format.format(Date())}")
         appendLine()
         lines.forEach(::appendLine)
