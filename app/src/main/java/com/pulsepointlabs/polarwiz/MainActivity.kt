@@ -14,6 +14,7 @@ import android.widget.LinearLayout
 import android.widget.ImageButton
 import android.widget.SeekBar
 import android.content.res.ColorStateList
+import android.view.View
 import androidx.appcompat.app.AlertDialog
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
@@ -34,6 +35,7 @@ class MainActivity : AppCompatActivity() {
     private var renderedPolarIds = emptyList<String>()
     private var renderedLights = emptyList<String>()
     private var renderedHueLights = emptyList<String>()
+    private var advancedAutomationVisible = false
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -95,6 +97,10 @@ class MainActivity : AppCompatActivity() {
         })
         binding.themeBrightnessButton.setOnClickListener { viewModel.clearAutomationBrightness() }
         binding.groupFilterButton.setOnClickListener { showGroupPicker() }
+        binding.advancedAutomationButton.setOnClickListener {
+            advancedAutomationVisible = !advancedAutomationVisible
+            updateAdvancedAutomationVisibility()
+        }
         binding.pauseAutomationButton.setOnClickListener {
             viewModel.setAutomationPaused(!viewModel.ui.value.automationPaused)
         }
@@ -119,6 +125,7 @@ class MainActivity : AppCompatActivity() {
         binding.wizOffsetSeek.setOnSeekBarChangeListener(offsetListener(true))
         binding.hueOffsetSeek.setOnSeekBarChangeListener(offsetListener(false))
         binding.autoCalibrateButton.setOnClickListener { viewModel.autoCalibrateTiming() }
+        updateAdvancedAutomationVisibility()
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -144,7 +151,19 @@ class MainActivity : AppCompatActivity() {
         zoneText.text = "Zone: ${state.zone?.label ?: "--"}"
         lastCommandText.text = "Last command: ${state.lastCommand}"
         errorText.text = state.error.orEmpty()
-        groupFilterButton.text = "Control group: ${state.activeGroup}"
+        groupFilterButton.text = "Control group: ${state.activeGroup}  •  tap to change"
+        val includedWizCount = state.lights.count {
+            it.selected && it.online && (state.activeGroup == "All lights" || it.group == state.activeGroup)
+        }
+        val selectedOutsideGroup = state.lights.count {
+            it.selected && it.online && state.activeGroup != "All lights" && it.group != state.activeGroup
+        }
+        wizControlScopeText.text = when {
+            state.lights.isEmpty() -> "Discover or manually add lights, then select the ones SarahVS Glow should control."
+            state.activeGroup == "All lights" -> "Control scope: $includedWizCount selected online WiZ light(s)."
+            selectedOutsideGroup > 0 -> "Control scope: $includedWizCount selected online WiZ light(s) in ${state.activeGroup}. $selectedOutsideGroup selected light(s) are outside this group and will not respond."
+            else -> "Control scope: $includedWizCount selected online WiZ light(s) in ${state.activeGroup}."
+        }
         pauseAutomationButton.text = if (state.automationPaused) "Resume" else "Pause"
         if (demoSwitch.isChecked != state.demoEnabled) demoSwitch.isChecked = state.demoEnabled
         if (automationSwitch.isChecked != state.automationEnabled) automationSwitch.isChecked = state.automationEnabled
@@ -204,7 +223,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        val lightKeys = state.lights.map { "${it.address.hostAddress}|${it.selected}|${it.name}|${it.group}|${it.online}" }
+        val lightKeys = state.lights.map { "${it.address.hostAddress}|${it.selected}|${it.name}|${it.group}|${it.online}|${state.activeGroup}" }
         if (lightKeys != renderedLights) {
             renderedLights = lightKeys
             wizLightList.removeAllViews()
@@ -222,8 +241,17 @@ class MainActivity : AppCompatActivity() {
                 }
                 row.addView(CheckBox(this@MainActivity).apply {
                     val groupSuffix = light.group.takeIf { it != "All lights" }?.let { "  •  $it" }.orEmpty()
-                    text = "${light.name}\n${light.address.hostAddress}  •  ${if (light.online) "Online" else "Offline"}$groupSuffix"
-                    setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+                    val included = light.selected && light.online && (state.activeGroup == "All lights" || light.group == state.activeGroup)
+                    val excludedByGroup = light.selected && light.online && state.activeGroup != "All lights" && light.group != state.activeGroup
+                    val controlStatus = when {
+                        included -> "Included in controls"
+                        excludedByGroup -> "Selected but excluded by ${state.activeGroup}"
+                        light.selected && light.online -> "Selected"
+                        light.online -> "Online"
+                        else -> "Offline"
+                    }
+                    text = "${light.name}\n${light.address.hostAddress}  •  $controlStatus$groupSuffix"
+                    setTextColor(ContextCompat.getColor(this@MainActivity, if (excludedByGroup) R.color.warning else R.color.text_primary))
                     buttonTintList = ColorStateList.valueOf(ContextCompat.getColor(this@MainActivity, R.color.accent))
                     textSize = 15f
                     maxLines = 2
@@ -287,6 +315,15 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun updateAdvancedAutomationVisibility() = with(binding) {
+        advancedAutomationPanel.visibility = if (advancedAutomationVisible) View.VISIBLE else View.GONE
+        advancedAutomationButton.text = if (advancedAutomationVisible) {
+            "Hide advanced automation settings"
+        } else {
+            "Show advanced automation settings"
+        }
+    }
+
     private fun brightness() = binding.brightnessSeek.progress.coerceAtLeast(10)
     private fun offsetListener(wiz: Boolean) = object : SeekBar.OnSeekBarChangeListener {
         override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
@@ -322,6 +359,7 @@ class MainActivity : AppCompatActivity() {
         val checked = groups.indexOf(state.activeGroup).coerceAtLeast(0)
         AlertDialog.Builder(this)
             .setTitle("Control group")
+            .setMessage("Only selected online lights in this group respond to manual controls and HR automation. Choose All lights to include every selected WiZ light.")
             .setSingleChoiceItems(groups, checked) { dialog, which ->
                 viewModel.setActiveGroup(groups[which])
                 dialog.dismiss()

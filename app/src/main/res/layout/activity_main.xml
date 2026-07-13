@@ -28,22 +28,6 @@
         </LinearLayout>
 
         <LinearLayout style="@style/CardPanel">
-            <TextView style="@style/SectionTitle" android:text="◉  Philips Hue" android:textColor="@color/accent" />
-            <TextView style="@style/HelperText" android:text="Bridge control is local. Press the physical bridge button, then pair once." />
-            <LinearLayout style="@style/ButtonRow">
-                <EditText android:id="@+id/hueBridgeIpText" android:layout_width="0dp" android:layout_height="48dp"
-                    android:layout_weight="2" android:hint="Hue Bridge IP" android:inputType="text"
-                    android:textColor="@color/text_primary" android:textColorHint="@color/text_muted" android:background="@drawable/bg_input" />
-                <Button android:id="@+id/pairHueButton" style="@style/PrimaryButton" android:text="Pair" />
-                <Button android:id="@+id/refreshHueButton" style="@style/ActionButton" android:text="Refresh" />
-            </LinearLayout>
-            <TextView android:id="@+id/hueStatusText" style="@style/BodyText" android:text="Hue Bridge not paired" />
-            <Button android:id="@+id/testHueButton" style="@style/PrimaryButton"
-                android:layout_width="match_parent" android:layout_weight="0" android:text="Test selected Hue lights" />
-            <LinearLayout android:id="@+id/hueLightList" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" />
-        </LinearLayout>
-
-        <LinearLayout style="@style/CardPanel">
             <TextView style="@style/SectionTitle" android:text="♥  Polar H10" android:textColor="@color/heart" />
             <LinearLayout style="@style/ButtonRow">
                 <Button android:id="@+id/scanPolarButton" style="@style/PrimaryButton" android:text="Scan" />
@@ -76,6 +60,8 @@
             <TextView android:id="@+id/wizStatusText" style="@style/BodyText" android:text="No lights discovered" />
             <Button android:id="@+id/groupFilterButton" style="@style/CompactButton"
                 android:layout_width="match_parent" android:text="Control group: All lights" />
+            <TextView android:id="@+id/wizControlScopeText" style="@style/HelperText"
+                android:text="Selected online lights in the active control group will respond." />
             <LinearLayout android:id="@+id/wizLightList" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" />
             <LinearLayout style="@style/ButtonRow" android:gravity="center_vertical">
                 <TextView android:id="@+id/brightnessLabel" style="@style/BodyText" android:layout_width="0dp" android:layout_weight="1" android:text="Brightness: theme default" />
@@ -91,6 +77,22 @@
         </LinearLayout>
 
         <LinearLayout style="@style/CardPanel">
+            <TextView style="@style/SectionTitle" android:text="◉  Philips Hue" android:textColor="@color/accent" />
+            <TextView style="@style/HelperText" android:text="Bridge control is local. Press the physical bridge button, then pair once." />
+            <LinearLayout style="@style/ButtonRow">
+                <EditText android:id="@+id/hueBridgeIpText" android:layout_width="0dp" android:layout_height="48dp"
+                    android:layout_weight="2" android:hint="Hue Bridge IP" android:inputType="text"
+                    android:textColor="@color/text_primary" android:textColorHint="@color/text_muted" android:background="@drawable/bg_input" />
+                <Button android:id="@+id/pairHueButton" style="@style/PrimaryButton" android:text="Pair" />
+                <Button android:id="@+id/refreshHueButton" style="@style/ActionButton" android:text="Refresh" />
+            </LinearLayout>
+            <TextView android:id="@+id/hueStatusText" style="@style/BodyText" android:text="Hue Bridge not paired" />
+            <Button android:id="@+id/testHueButton" style="@style/PrimaryButton"
+                android:layout_width="match_parent" android:layout_weight="0" android:text="Test selected Hue lights" />
+            <LinearLayout android:id="@+id/hueLightList" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" />
+        </LinearLayout>
+
+        <LinearLayout style="@style/CardPanel">
             <TextView style="@style/SectionTitle" android:text="⚡  Automation" android:textColor="@color/accent" />
             <TextView style="@style/HelperText" android:text="Automation follows smoothed HR zones. Heartbeat pulse can use SarahVS R-wave events when available." />
             <TextView style="@style/BodyText" android:text="Lighting theme" android:layout_marginTop="8dp" />
@@ -102,40 +104,46 @@
             <androidx.appcompat.widget.SwitchCompat android:id="@+id/heartbeatPulseSwitch"
                 android:layout_width="match_parent" android:layout_height="48dp"
                 android:text="Subtle heartbeat pulse" android:textColor="@color/text_primary" />
-            <androidx.appcompat.widget.SwitchCompat android:id="@+id/lowLatencySwitch"
-                android:layout_width="match_parent" android:layout_height="48dp"
-                android:text="Low-latency mode (higher battery use)" android:textColor="@color/text_primary" />
-            <androidx.appcompat.widget.SwitchCompat android:id="@+id/precisionModeSwitch"
-                android:layout_width="match_parent" android:layout_height="48dp"
-                android:text="ECG R-wave precision mode" android:textColor="@color/text_primary" />
-            <TextView android:id="@+id/precisionStatusText" style="@style/BodyText" android:text="Standard RR timing" />
-            <TextView style="@style/BodyText" android:text="Heartbeat shape" />
-            <Spinner android:id="@+id/pulseShapeSpinner" android:layout_width="match_parent" android:layout_height="48dp"
-                android:popupBackground="@color/panel_variant" />
-            <TextView android:id="@+id/heartbeatIntensityLabel" style="@style/BodyText"
-                android:text="Heartbeat reaction: 8%" />
-            <SeekBar android:id="@+id/heartbeatIntensitySeek" android:layout_width="match_parent"
-                android:layout_height="wrap_content" android:min="2" android:max="40" android:progress="8" />
-            <TextView android:id="@+id/wizOffsetLabel" style="@style/BodyText" android:text="WiZ timing delay: 0 ms" />
-            <SeekBar android:id="@+id/wizOffsetSeek" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="300" android:progress="0" />
-            <TextView android:id="@+id/hueOffsetLabel" style="@style/BodyText" android:text="Hue timing delay: 0 ms" />
-            <SeekBar android:id="@+id/hueOffsetSeek" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="300" android:progress="0" />
-            <Button android:id="@+id/autoCalibrateButton" style="@style/CompactButton"
-                android:layout_width="match_parent" android:text="Auto-calibrate WiZ / Hue timing" />
-            <androidx.appcompat.widget.SwitchCompat android:id="@+id/circadianSwitch"
-                android:layout_width="match_parent" android:layout_height="48dp"
-                android:text="Circadian daylight schedule" android:textColor="@color/text_primary" />
-            <TextView android:id="@+id/signalStatusText" style="@style/BodyText" android:text="Signal: waiting" />
-            <androidx.appcompat.widget.SwitchCompat android:id="@+id/sleepAutomationSwitch"
-                android:layout_width="match_parent" android:layout_height="48dp"
-                android:text="Sleep / wake light automation" android:textColor="@color/text_primary" />
-            <androidx.appcompat.widget.SwitchCompat android:id="@+id/restoreOnWakeSwitch"
-                android:layout_width="match_parent" android:layout_height="48dp"
-                android:text="Restore previous light state on wake" android:textColor="@color/text_primary" />
-            <TextView android:id="@+id/sleepStatusText" style="@style/BodyText" android:text="Sleep status: Awake" />
-            <TextView android:id="@+id/sleepHistoryText" style="@style/BodyText"
-                android:text="Sleep/wake history: no events yet"
-                android:maxLines="8" android:ellipsize="end" />
+            <Button android:id="@+id/advancedAutomationButton" style="@style/CompactButton"
+                android:layout_width="match_parent" android:text="Show advanced automation settings" />
+            <LinearLayout android:id="@+id/advancedAutomationPanel"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="vertical" android:visibility="gone">
+                <androidx.appcompat.widget.SwitchCompat android:id="@+id/lowLatencySwitch"
+                    android:layout_width="match_parent" android:layout_height="48dp"
+                    android:text="Low-latency mode (higher battery use)" android:textColor="@color/text_primary" />
+                <androidx.appcompat.widget.SwitchCompat android:id="@+id/precisionModeSwitch"
+                    android:layout_width="match_parent" android:layout_height="48dp"
+                    android:text="ECG R-wave precision mode" android:textColor="@color/text_primary" />
+                <TextView android:id="@+id/precisionStatusText" style="@style/BodyText" android:text="Standard RR timing" />
+                <TextView style="@style/BodyText" android:text="Heartbeat shape" />
+                <Spinner android:id="@+id/pulseShapeSpinner" android:layout_width="match_parent" android:layout_height="48dp"
+                    android:popupBackground="@color/panel_variant" />
+                <TextView android:id="@+id/heartbeatIntensityLabel" style="@style/BodyText"
+                    android:text="Heartbeat reaction: 8%" />
+                <SeekBar android:id="@+id/heartbeatIntensitySeek" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:min="2" android:max="40" android:progress="8" />
+                <TextView android:id="@+id/wizOffsetLabel" style="@style/BodyText" android:text="WiZ timing delay: 0 ms" />
+                <SeekBar android:id="@+id/wizOffsetSeek" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="300" android:progress="0" />
+                <TextView android:id="@+id/hueOffsetLabel" style="@style/BodyText" android:text="Hue timing delay: 0 ms" />
+                <SeekBar android:id="@+id/hueOffsetSeek" android:layout_width="match_parent" android:layout_height="wrap_content" android:max="300" android:progress="0" />
+                <Button android:id="@+id/autoCalibrateButton" style="@style/CompactButton"
+                    android:layout_width="match_parent" android:text="Auto-calibrate WiZ / Hue timing" />
+                <androidx.appcompat.widget.SwitchCompat android:id="@+id/circadianSwitch"
+                    android:layout_width="match_parent" android:layout_height="48dp"
+                    android:text="Circadian daylight schedule" android:textColor="@color/text_primary" />
+                <TextView android:id="@+id/signalStatusText" style="@style/BodyText" android:text="Signal: waiting" />
+                <androidx.appcompat.widget.SwitchCompat android:id="@+id/sleepAutomationSwitch"
+                    android:layout_width="match_parent" android:layout_height="48dp"
+                    android:text="Sleep / wake light automation" android:textColor="@color/text_primary" />
+                <androidx.appcompat.widget.SwitchCompat android:id="@+id/restoreOnWakeSwitch"
+                    android:layout_width="match_parent" android:layout_height="48dp"
+                    android:text="Restore previous light state on wake" android:textColor="@color/text_primary" />
+                <TextView android:id="@+id/sleepStatusText" style="@style/BodyText" android:text="Sleep status: Awake" />
+                <TextView android:id="@+id/sleepHistoryText" style="@style/BodyText"
+                    android:text="Sleep/wake history: no events yet"
+                    android:maxLines="8" android:ellipsize="end" />
+            </LinearLayout>
             <TextView android:id="@+id/zoneText" style="@style/MetricText" android:text="Zone: --" android:layout_marginTop="8dp" />
             <TextView android:id="@+id/lastCommandText" style="@style/BodyText" android:text="Last command: none" android:maxLines="3" android:ellipsize="end" />
             <TextView android:id="@+id/errorText" style="@style/BodyText" android:textColor="#FFFCA5A5" android:maxLines="3" android:ellipsize="end" />
