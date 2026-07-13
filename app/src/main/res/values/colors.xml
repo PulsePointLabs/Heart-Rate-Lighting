@@ -1,13 +1,17 @@
 <resources>
-    <color name="navy">#090C12</color>
-    <color name="panel">#121722</color>
-    <color name="panel_variant">#202938</color>
+    <color name="navy">#070A12</color>
+    <color name="panel">#111827</color>
+    <color name="panel_variant">#1B2433</color>
+    <color name="panel_elevated">#202B3D</color>
     <color name="text_primary">#F8FAFC</color>
-    <color name="text_secondary">#B8C5D8</color>
+    <color name="text_secondary">#B7C2D6</color>
+    <color name="text_muted">#8190A8</color>
     <color name="accent">#C4B5FD</color>
     <color name="accent_dark">#24113B</color>
     <color name="heart">#FF6B88</color>
     <color name="telemetry">#45C7FA</color>
-    <color name="outline">#74849A</color>
+    <color name="outline">#344155</color>
     <color name="success">#34D399</color>
+    <color name="danger">#FCA5A5</color>
+    <color name="warning">#FBBF24</color>
 </resources>
