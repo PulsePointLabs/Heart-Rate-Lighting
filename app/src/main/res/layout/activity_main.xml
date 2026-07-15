@@ -101,6 +101,11 @@
             <androidx.appcompat.widget.SwitchCompat android:id="@+id/automationSwitch"
                 android:layout_width="match_parent" android:layout_height="48dp"
                 android:text="Enable HR-controlled lighting" android:textColor="@color/text_primary" />
+            <androidx.appcompat.widget.SwitchCompat android:id="@+id/stressLightingSwitch"
+                android:layout_width="match_parent" android:layout_height="48dp"
+                android:text="Use SarahVS stress color" android:textColor="@color/text_primary" />
+            <TextView android:id="@+id/stressStatusText" style="@style/BodyText"
+                android:text="SarahVS stress: waiting for score" />
             <androidx.appcompat.widget.SwitchCompat android:id="@+id/heartbeatPulseSwitch"
                 android:layout_width="match_parent" android:layout_height="48dp"
                 android:text="Subtle heartbeat pulse" android:textColor="@color/text_primary" />

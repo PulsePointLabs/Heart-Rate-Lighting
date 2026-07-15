@@ -64,6 +64,7 @@ class MainActivity : AppCompatActivity() {
             if (checked) requestNotificationPermissionIfNeeded()
             viewModel.setAutomation(checked)
         }
+        binding.stressLightingSwitch.setOnCheckedChangeListener { _, checked -> viewModel.setStressLighting(checked) }
         binding.heartbeatPulseSwitch.setOnCheckedChangeListener { _, checked -> viewModel.setHeartbeatPulse(checked) }
         binding.lowLatencySwitch.setOnCheckedChangeListener { _, checked -> viewModel.setLowLatencyMode(checked) }
         binding.precisionModeSwitch.setOnCheckedChangeListener { _, checked -> viewModel.setPrecisionMode(checked) }
@@ -167,6 +168,10 @@ class MainActivity : AppCompatActivity() {
         pauseAutomationButton.text = if (state.automationPaused) "Resume" else "Pause"
         if (demoSwitch.isChecked != state.demoEnabled) demoSwitch.isChecked = state.demoEnabled
         if (automationSwitch.isChecked != state.automationEnabled) automationSwitch.isChecked = state.automationEnabled
+        if (stressLightingSwitch.isChecked != state.stressLightingEnabled) stressLightingSwitch.isChecked = state.stressLightingEnabled
+        stressStatusText.text = state.stressScore?.let { score ->
+            "SarahVS stress: ${state.stressLevel}, $score%  •  green → red"
+        } ?: "SarahVS stress: ${state.stressLevel}"
         if (heartbeatPulseSwitch.isChecked != state.heartbeatPulseEnabled) heartbeatPulseSwitch.isChecked = state.heartbeatPulseEnabled
         if (lowLatencySwitch.isChecked != state.lowLatencyMode) lowLatencySwitch.isChecked = state.lowLatencyMode
         if (precisionModeSwitch.isChecked != state.precisionMode) precisionModeSwitch.isChecked = state.precisionMode

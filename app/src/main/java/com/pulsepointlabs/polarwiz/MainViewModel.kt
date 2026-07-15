@@ -1,6 +1,7 @@
 package com.pulsepointlabs.polarwiz
 
 import android.app.Application
+import android.graphics.Color
 import android.util.Log
 import android.content.Intent
 import android.os.SystemClock
@@ -56,6 +57,9 @@ data class UiState(
     val lightingTheme: LightingTheme = LightingTheme.PULSE,
     val brightnessOverride: Int? = null,
     val automationEnabled: Boolean = false,
+    val stressLightingEnabled: Boolean = false,
+    val stressScore: Int? = null,
+    val stressLevel: String = "Waiting",
     val heartbeatPulseEnabled: Boolean = false,
     val heartbeatPulseIntensity: Int = 8,
     val lowLatencyMode: Boolean = true,
@@ -100,6 +104,7 @@ class LightingRuntime(private val application: Application) {
             }.getOrDefault(LightingTheme.PULSE),
             brightnessOverride = preferences.getInt("brightness_override", -1).takeIf { it in 10..100 },
             automationEnabled = preferences.getBoolean("automation_enabled", false),
+            stressLightingEnabled = preferences.getBoolean("stress_lighting_enabled", false),
             heartbeatPulseEnabled = preferences.getBoolean("heartbeat_pulse_enabled", false),
             heartbeatPulseIntensity = preferences.getInt("heartbeat_pulse_intensity", 8).coerceIn(2, 40),
             lowLatencyMode = preferences.getBoolean("low_latency_mode", true),
@@ -128,6 +133,7 @@ class LightingRuntime(private val application: Application) {
     private var watchdogJob: Job? = null
     private var circadianJob: Job? = null
     private var lastSentZone: HrZone? = null
+    private var lastSentStressBucket: Int? = null
     private var lastCommandAt = 0L
     private var polarSessionActive = false
     @Volatile private var lastSarahVsSampleAt = 0L
@@ -414,9 +420,10 @@ class LightingRuntime(private val application: Application) {
     fun setLightingTheme(theme: LightingTheme) {
         if (_ui.value.lightingTheme == theme) return
         lastSentZone = null
+        lastSentStressBucket = null
         _ui.value = _ui.value.copy(lightingTheme = theme)
         preferences.edit().putString("lighting_theme", theme.name).apply()
-        if (_ui.value.automationEnabled) _ui.value.zone?.let(::queueAutomation)
+        if (_ui.value.automationEnabled && !_ui.value.stressLightingEnabled) _ui.value.zone?.let(::queueAutomation)
     }
 
     fun setAutomationBrightness(brightness: Int) {
@@ -497,6 +504,7 @@ class LightingRuntime(private val application: Application) {
 
     fun setAutomation(enabled: Boolean) {
         lastSentZone = null
+        lastSentStressBucket = null
         _ui.value = _ui.value.copy(automationEnabled = enabled)
         preferences.edit().putBoolean("automation_enabled", enabled).apply()
         updateLowLatencyMode()
@@ -505,7 +513,11 @@ class LightingRuntime(private val application: Application) {
             scope.launch {
                 previousLightStates = wiz.snapshot(selectedLights())
                 DiagnosticLog.add(TAG, "Captured ${previousLightStates.size} pre-automation light states")
-                _ui.value.zone?.let(::queueAutomation)
+                if (_ui.value.stressLightingEnabled) {
+                    _ui.value.stressScore?.let { queueStressAutomation(it, _ui.value.stressLevel) }
+                } else {
+                    _ui.value.zone?.let(::queueAutomation)
+                }
             }
         } else if (previousLightStates.isNotEmpty()) {
             scope.launch {
@@ -513,6 +525,20 @@ class LightingRuntime(private val application: Application) {
                     _ui.value = _ui.value.copy(lastCommand = "Restored pre-automation light state")
                 }.onFailure { setError("Could not restore prior light state: ${it.message}") }
                 previousLightStates = emptyMap()
+            }
+        }
+    }
+
+    fun setStressLighting(enabled: Boolean) {
+        lastSentZone = null
+        lastSentStressBucket = null
+        _ui.value = _ui.value.copy(stressLightingEnabled = enabled)
+        preferences.edit().putBoolean("stress_lighting_enabled", enabled).apply()
+        if (_ui.value.automationEnabled) {
+            if (enabled) {
+                _ui.value.stressScore?.let { queueStressAutomation(it, _ui.value.stressLevel) }
+            } else {
+                _ui.value.zone?.let(::queueAutomation)
             }
         }
     }
@@ -843,6 +869,11 @@ class LightingRuntime(private val application: Application) {
                                 if (bpm != null && bpm in 25..240) acceptSarahVsHeartRate(bpm, rr)
                             }
                             "BEAT" -> acceptSarahVsRPeak()
+                            "STRESS" -> {
+                                val score = fields.getOrNull(2)?.toIntOrNull()?.takeIf { it in 0..100 }
+                                val level = fields.getOrNull(3)?.replace('_', ' ') ?: "Unavailable"
+                                acceptSarahVsStress(score, level)
+                            }
                         }
                     }
                 }
@@ -864,13 +895,66 @@ class LightingRuntime(private val application: Application) {
         fireHeartbeatPulse(_ui.value, _ui.value.pulseShape.durationMs)
     }
 
+    fun acceptSarahVsStress(score: Int?, level: String) {
+        _ui.value = _ui.value.copy(
+            stressScore = score,
+            stressLevel = level.split(' ').joinToString(" ") { word ->
+                word.lowercase().replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.US) else it.toString() }
+            }
+        )
+        if (score != null && _ui.value.automationEnabled && _ui.value.stressLightingEnabled && !_ui.value.automationPaused && sleepDetector.state != SleepWakeDetector.State.SLEEPING) {
+            queueStressAutomation(score, _ui.value.stressLevel)
+        }
+    }
+
     private fun acceptBpm(bpm: Int, rr: Int?) {
         lastHeartDataAt = System.currentTimeMillis()
         val smooth = processor.add(bpm)
         val zone = processor.zoneFor(smooth)
         _ui.value = _ui.value.copy(bpm = bpm, smoothedBpm = smooth, rrMs = rr, zone = zone)
         if (_ui.value.sleepAutomationEnabled) handleSleepEvent(sleepDetector.onHeartRate(smooth))
-        if (_ui.value.automationEnabled && !_ui.value.automationPaused && sleepDetector.state != SleepWakeDetector.State.SLEEPING && zone != lastSentZone) queueAutomation(zone)
+        if (!_ui.value.stressLightingEnabled && _ui.value.automationEnabled && !_ui.value.automationPaused && sleepDetector.state != SleepWakeDetector.State.SLEEPING && zone != lastSentZone) queueAutomation(zone)
+    }
+
+    private fun queueStressAutomation(score: Int, level: String) {
+        val bucket = score / 10
+        if (lastSentStressBucket == bucket) return
+        automationJob?.cancel()
+        automationJob = scope.launch {
+            val remaining = (lastCommandAt + MIN_COMMAND_INTERVAL_MS - System.currentTimeMillis()).coerceAtLeast(0)
+            delay(remaining)
+            val state = _ui.value
+            if (!state.automationEnabled || !state.stressLightingEnabled || state.automationPaused || sleepDetector.state == SleepWakeDetector.State.SLEEPING || state.stressScore == null || state.stressScore / 10 == lastSentStressBucket) return@launch
+            val stress = state.stressScore.coerceIn(0, 100)
+            val color = stressColor(stress)
+            val brightness = state.brightnessOverride ?: (35 + stress * 65 / 100).coerceIn(35, 100)
+            var succeeded = false
+            selectedLights().takeIf { it.isNotEmpty() }?.let { lights ->
+                wiz.setColor(lights, color, brightness, null).fold(
+                    onSuccess = { succeeded = true },
+                    onFailure = { setError("Stress lighting failed: ${it.message}") }
+                )
+            }
+            hueCredentials()?.takeIf { selectedHueLights().isNotEmpty() }?.let { (ip, key) ->
+                hue.setColor(ip, key, selectedHueLights(), color, brightness, null).fold(
+                    onSuccess = { succeeded = true },
+                    onFailure = { setError("Hue stress lighting failed: ${it.message}") }
+                )
+            }
+            if (succeeded) {
+                lastSentStressBucket = stress / 10
+                lastSentZone = null
+                lastCommandAt = System.currentTimeMillis()
+                _ui.value = _ui.value.copy(lastCommand = "SarahVS stress: $level $stress%, $brightness%", error = null)
+            }
+        }
+    }
+
+    private fun stressColor(score: Int): Rgb {
+        val value = score.coerceIn(0, 100)
+        val hue = 120f - (value * 1.2f)
+        val packed = Color.HSVToColor(floatArrayOf(hue.coerceIn(0f, 120f), 0.92f, 1.0f))
+        return Rgb(Color.red(packed), Color.green(packed), Color.blue(packed))
     }
 
     private fun queueAutomation(zone: HrZone) {
@@ -1029,6 +1113,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun manualColor(color: Rgb?, brightness: Int, temperature: Int? = null) = runtime.manualColor(color, brightness, temperature)
     fun turnOff() = runtime.turnOff()
     fun setAutomation(enabled: Boolean) = runtime.setAutomation(enabled)
+    fun setStressLighting(enabled: Boolean) = runtime.setStressLighting(enabled)
     fun setHeartbeatPulse(enabled: Boolean) = runtime.setHeartbeatPulse(enabled)
     fun setHeartbeatPulseIntensity(intensity: Int) = runtime.setHeartbeatPulseIntensity(intensity)
     fun setLowLatencyMode(enabled: Boolean) = runtime.setLowLatencyMode(enabled)
