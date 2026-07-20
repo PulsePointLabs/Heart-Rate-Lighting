@@ -16,11 +16,10 @@ class AutomationKeepAliveService : Service() {
     override fun onCreate() {
         super.onCreate()
         (application as PolarWizApplication).runtime
-        DiagnosticLog.add("KeepAlive", "Foreground service created")
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, "SarahVS Glow background", NotificationManager.IMPORTANCE_LOW).apply {
-                description = "Keeps SarahVS Glow lighting automation active in the background"
+            NotificationChannel(CHANNEL_ID, "Heart-rate lighting", NotificationManager.IMPORTANCE_LOW).apply {
+                description = "Keeps Polar H10 and WiZ lighting active in the background"
                 setShowBadge(false)
             }
         )
@@ -32,7 +31,6 @@ class AutomationKeepAliveService : Service() {
             ACTION_PAUSE -> runtime.setAutomationPaused(!runtime.ui.value.automationPaused)
             ACTION_OFF -> runtime.turnOff()
         }
-        DiagnosticLog.add("KeepAlive", "Foreground service started action=${intent?.action ?: "none"}")
         val openApp = PendingIntent.getActivity(
             this,
             0,
@@ -45,8 +43,8 @@ class AutomationKeepAliveService : Service() {
         )
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_polar_wiz)
-            .setContentTitle("SarahVS Glow active")
-            .setContentText("Heart feed, sleep detection, and light automation continue in the background")
+            .setContentTitle("Polar WiZ lighting active")
+            .setContentText("H10, sleep detection, and light automation continue in the background")
             .setContentIntent(openApp)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
