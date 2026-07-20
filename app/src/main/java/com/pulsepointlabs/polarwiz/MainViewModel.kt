@@ -21,11 +21,14 @@ import com.pulsepointlabs.polarwiz.model.LightingTheme
 import com.pulsepointlabs.polarwiz.wiz.WizLanManager
 import com.pulsepointlabs.polarwiz.sleep.SleepWakeDetector
 import com.pulsepointlabs.polarwiz.sleep.SleepWakeMonitor
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -132,6 +135,7 @@ class LightingRuntime(private val application: Application) {
     private var sleepEvaluationJob: Job? = null
     private var watchdogJob: Job? = null
     private var circadianJob: Job? = null
+    private var sarahVsFeedJob: Job? = null
     private var lastSentZone: HrZone? = null
     private var lastSentStressBucket: Int? = null
     private var lastCommandAt = 0L
@@ -196,8 +200,8 @@ class LightingRuntime(private val application: Application) {
         }
         if (restoredLights.isNotEmpty()) discoverLights(silentRefresh = true)
         if (hueKey != null) refreshHueLights()
-        healthJob = scope.launch {
-            while (true) {
+        healthJob = launchRestartingLoop("WiZ health monitor") {
+            while (isActive) {
                 delay(30_000)
                 val snapshot = _ui.value.lights
                 if (snapshot.isNotEmpty()) {
@@ -210,8 +214,8 @@ class LightingRuntime(private val application: Application) {
                 }
             }
         }
-        scope.launch {
-            while (true) {
+        launchRestartingLoop("SarahVS feed watchdog") {
+            while (isActive) {
                 delay(3_000)
                 if (lastSarahVsSampleAt > 0 && System.currentTimeMillis() - lastSarahVsSampleAt > SARAHVS_FEED_TIMEOUT_MS) {
                     lastSarahVsSampleAt = 0
@@ -219,8 +223,8 @@ class LightingRuntime(private val application: Application) {
                 }
             }
         }
-        watchdogJob = scope.launch {
-            while (true) {
+        watchdogJob = launchRestartingLoop("Heart signal watchdog") {
+            while (isActive) {
                 delay(2_000)
                 val age = System.currentTimeMillis() - lastHeartDataAt
                 val signal = when {
@@ -242,6 +246,43 @@ class LightingRuntime(private val application: Application) {
         }
         startCircadianLoop()
     }
+
+    private fun launchRestartingLoop(
+        name: String,
+        dispatcher: CoroutineDispatcher = Dispatchers.Main.immediate,
+        block: suspend CoroutineScope.() -> Unit
+    ): Job = scope.launch(dispatcher) {
+        var failures = 0
+        while (isActive) {
+            try {
+                failures = 0
+                block()
+                if (isActive) {
+                    DiagnosticLog.add(TAG, "$name exited; restarting")
+                    delay(1_000)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                failures += 1
+                val backoffMs = (failures * 1_000L).coerceIn(1_000L, 30_000L)
+                val message = error.message ?: error::class.java.simpleName
+                DiagnosticLog.add(TAG, "$name failed: $message; restarting in ${backoffMs}ms")
+                delay(backoffMs)
+            }
+        }
+    }
+
+    private fun launchGuarded(name: String, block: suspend CoroutineScope.() -> Unit): Job =
+        scope.launch {
+            try {
+                block()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                setError("$name failed: ${error.message ?: error::class.java.simpleName}")
+            }
+        }
 
     fun scanPolar() = polar.scan()
     fun connectPolar(id: String) {
@@ -552,10 +593,10 @@ class LightingRuntime(private val application: Application) {
         preferences.edit().putBoolean("heartbeat_pulse_enabled", enabled).apply()
         updateLowLatencyMode()
         if (enabled) {
-            heartbeatJob = scope.launch {
+            heartbeatJob = launchRestartingLoop("Heartbeat pulse scheduler") {
                 var nextBeatAt = SystemClock.elapsedRealtime()
                 var smoothedIntervalMs: Double? = null
-                while (true) {
+                while (isActive) {
                     val state = _ui.value
                     val bpm = state.smoothedBpm
                     val ecgDriving = (state.precisionMode && System.currentTimeMillis() - lastRPeakAt < 2_000) ||
@@ -587,7 +628,7 @@ class LightingRuntime(private val application: Application) {
         val baseBrightness = state.brightnessOverride ?: baseStyle?.brightness ?: 60
         val heartbeatColor = zone?.let { state.lightingTheme.heartbeatColor(it) }
         val wizLights = selectedLights()
-        if (wizLights.isNotEmpty() && wizPulseJob?.isActive != true) wizPulseJob = scope.launch {
+        if (wizLights.isNotEmpty() && wizPulseJob?.isActive != true) wizPulseJob = launchGuarded("WiZ heartbeat pulse") {
             delay(state.wizTimingOffsetMs.toLong())
             suspend fun beat() = if (heartbeatColor != null) wiz.colorPulse(wizLights, heartbeatColor, baseBrightness, state.heartbeatPulseIntensity, durationMs, baseStyle?.temperature ?: 5000)
                 else wiz.pulse(wizLights, -state.heartbeatPulseIntensity, durationMs)
@@ -596,7 +637,7 @@ class LightingRuntime(private val application: Application) {
         }
         val hueLights = selectedHueLights()
         hueCredentials()?.takeIf { hueLights.isNotEmpty() && huePulseJob?.isActive != true }?.let { (ip, key) ->
-            huePulseJob = scope.launch {
+            huePulseJob = launchGuarded("Hue heartbeat pulse") {
                 delay(state.hueTimingOffsetMs.toLong())
                 suspend fun beat() = if (heartbeatColor != null) hue.colorPulse(ip, key, hueLights, heartbeatColor, baseBrightness, state.heartbeatPulseIntensity, durationMs, baseStyle?.temperature ?: 5000)
                     else hue.pulse(ip, key, hueLights, baseBrightness, state.heartbeatPulseIntensity, durationMs)
@@ -680,7 +721,12 @@ class LightingRuntime(private val application: Application) {
 
     private fun startCircadianLoop() {
         circadianJob?.cancel()
-        circadianJob = scope.launch { while (true) { if (_ui.value.circadianEnabled) applyCircadianNow(); delay(5 * 60_000L) } }
+        circadianJob = launchRestartingLoop("Circadian lighting loop") {
+            while (isActive) {
+                if (_ui.value.circadianEnabled) applyCircadianNow()
+                delay(5 * 60_000L)
+            }
+        }
     }
 
     private fun applyCircadianNow() {
@@ -713,8 +759,8 @@ class LightingRuntime(private val application: Application) {
         })
         sleepEvaluationJob?.cancel()
         if (hasAccelerometer) {
-            sleepEvaluationJob = scope.launch {
-                while (true) {
+            sleepEvaluationJob = launchRestartingLoop("Sleep/wake detector") {
+                while (isActive) {
                     delay(5_000)
                     handleSleepEvent(sleepDetector.evaluate())
                 }
@@ -824,9 +870,9 @@ class LightingRuntime(private val application: Application) {
         processor.reset()
         _ui.value = _ui.value.copy(demoEnabled = enabled, bpm = null, smoothedBpm = null, rrMs = null)
         if (enabled) {
-            demoJob = scope.launch {
+            demoJob = launchRestartingLoop("Demo BPM generator") {
                 var tick = 0
-                while (true) {
+                while (isActive) {
                     val bpm = (108 + 48 * sin(tick / 9.0)).toInt().coerceIn(58, 158)
                     acceptBpm(bpm, 60_000 / bpm)
                     tick++
@@ -849,35 +895,43 @@ class LightingRuntime(private val application: Application) {
     }
 
     private fun startSarahVsUdpFeed() {
-        scope.launch(Dispatchers.IO) {
-            runCatching {
-                DatagramSocket(null).use { socket ->
-                    socket.reuseAddress = true
-                    socket.bind(InetSocketAddress(InetAddress.getLoopbackAddress(), SARAHVS_UDP_PORT))
-                    DiagnosticLog.add(TAG, "SarahVS localhost HR receiver listening")
-                    val buffer = ByteArray(128)
-                    while (true) {
-                        val packet = DatagramPacket(buffer, buffer.size)
+        sarahVsFeedJob?.cancel()
+        sarahVsFeedJob = launchRestartingLoop("SarahVS localhost HR receiver", Dispatchers.IO) {
+            DatagramSocket(null).use { socket ->
+                socket.reuseAddress = true
+                socket.soTimeout = 15_000
+                socket.bind(InetSocketAddress(InetAddress.getLoopbackAddress(), SARAHVS_UDP_PORT))
+                DiagnosticLog.add(TAG, "SarahVS localhost HR receiver listening")
+                val buffer = ByteArray(128)
+                while (isActive) {
+                    val packet = DatagramPacket(buffer, buffer.size)
+                    val received = try {
                         socket.receive(packet)
+                        true
+                    } catch (timeout: java.net.SocketTimeoutException) {
+                        false
+                    }
+                    if (received) {
                         val message = packet.data.decodeToString(packet.offset, packet.offset + packet.length)
                         val fields = message.split('|')
-                        if (fields.firstOrNull() != "PPHR1") continue
-                        when (fields.getOrNull(1)) {
-                            "HR" -> {
-                                val bpm = fields.getOrNull(2)?.toIntOrNull()
-                                val rr = fields.getOrNull(3)?.toIntOrNull()?.takeIf { it > 0 }
-                                if (bpm != null && bpm in 25..240) acceptSarahVsHeartRate(bpm, rr)
-                            }
-                            "BEAT" -> acceptSarahVsRPeak()
-                            "STRESS" -> {
-                                val score = fields.getOrNull(2)?.toIntOrNull()?.takeIf { it in 0..100 }
-                                val level = fields.getOrNull(3)?.replace('_', ' ') ?: "Unavailable"
-                                acceptSarahVsStress(score, level)
+                        if (fields.firstOrNull() == "PPHR1") {
+                            when (fields.getOrNull(1)) {
+                                "HR" -> {
+                                    val bpm = fields.getOrNull(2)?.toIntOrNull()
+                                    val rr = fields.getOrNull(3)?.toIntOrNull()?.takeIf { it > 0 }
+                                    if (bpm != null && bpm in 25..240) acceptSarahVsHeartRate(bpm, rr)
+                                }
+                                "BEAT" -> acceptSarahVsRPeak()
+                                "STRESS" -> {
+                                    val score = fields.getOrNull(2)?.toIntOrNull()?.takeIf { it in 0..100 }
+                                    val level = fields.getOrNull(3)?.replace('_', ' ') ?: "Unavailable"
+                                    acceptSarahVsStress(score, level)
+                                }
                             }
                         }
                     }
                 }
-            }.onFailure { DiagnosticLog.add(TAG, "SarahVS localhost HR receiver failed: ${it.message}") }
+            }
         }
     }
 
@@ -921,31 +975,37 @@ class LightingRuntime(private val application: Application) {
         if (lastSentStressBucket == bucket) return
         automationJob?.cancel()
         automationJob = scope.launch {
-            val remaining = (lastCommandAt + MIN_COMMAND_INTERVAL_MS - System.currentTimeMillis()).coerceAtLeast(0)
-            delay(remaining)
-            val state = _ui.value
-            if (!state.automationEnabled || !state.stressLightingEnabled || state.automationPaused || sleepDetector.state == SleepWakeDetector.State.SLEEPING || state.stressScore == null || state.stressScore / 10 == lastSentStressBucket) return@launch
-            val stress = state.stressScore.coerceIn(0, 100)
-            val color = stressColor(stress)
-            val brightness = state.brightnessOverride ?: (35 + stress * 65 / 100).coerceIn(35, 100)
-            var succeeded = false
-            selectedLights().takeIf { it.isNotEmpty() }?.let { lights ->
-                wiz.setColor(lights, color, brightness, null).fold(
-                    onSuccess = { succeeded = true },
-                    onFailure = { setError("Stress lighting failed: ${it.message}") }
-                )
-            }
-            hueCredentials()?.takeIf { selectedHueLights().isNotEmpty() }?.let { (ip, key) ->
-                hue.setColor(ip, key, selectedHueLights(), color, brightness, null).fold(
-                    onSuccess = { succeeded = true },
-                    onFailure = { setError("Hue stress lighting failed: ${it.message}") }
-                )
-            }
-            if (succeeded) {
-                lastSentStressBucket = stress / 10
-                lastSentZone = null
-                lastCommandAt = System.currentTimeMillis()
-                _ui.value = _ui.value.copy(lastCommand = "SarahVS stress: $level $stress%, $brightness%", error = null)
+            try {
+                val remaining = (lastCommandAt + MIN_COMMAND_INTERVAL_MS - System.currentTimeMillis()).coerceAtLeast(0)
+                delay(remaining)
+                val state = _ui.value
+                if (!state.automationEnabled || !state.stressLightingEnabled || state.automationPaused || sleepDetector.state == SleepWakeDetector.State.SLEEPING || state.stressScore == null || state.stressScore / 10 == lastSentStressBucket) return@launch
+                val stress = state.stressScore.coerceIn(0, 100)
+                val color = stressColor(stress)
+                val brightness = state.brightnessOverride ?: (35 + stress * 65 / 100).coerceIn(35, 100)
+                var succeeded = false
+                selectedLights().takeIf { it.isNotEmpty() }?.let { lights ->
+                    wiz.setColor(lights, color, brightness, null).fold(
+                        onSuccess = { succeeded = true },
+                        onFailure = { setError("Stress lighting failed: ${it.message}") }
+                    )
+                }
+                hueCredentials()?.takeIf { selectedHueLights().isNotEmpty() }?.let { (ip, key) ->
+                    hue.setColor(ip, key, selectedHueLights(), color, brightness, null).fold(
+                        onSuccess = { succeeded = true },
+                        onFailure = { setError("Hue stress lighting failed: ${it.message}") }
+                    )
+                }
+                if (succeeded) {
+                    lastSentStressBucket = stress / 10
+                    lastSentZone = null
+                    lastCommandAt = System.currentTimeMillis()
+                    _ui.value = _ui.value.copy(lastCommand = "SarahVS stress: $level $stress%, $brightness%", error = null)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                setError("Stress automation command failed: ${error.message ?: error::class.java.simpleName}")
             }
         }
     }
@@ -960,27 +1020,33 @@ class LightingRuntime(private val application: Application) {
     private fun queueAutomation(zone: HrZone) {
         automationJob?.cancel()
         automationJob = scope.launch {
-            val remaining = (lastCommandAt + MIN_COMMAND_INTERVAL_MS - System.currentTimeMillis()).coerceAtLeast(0)
-            delay(remaining)
-            if (!_ui.value.automationEnabled || _ui.value.automationPaused || sleepDetector.state == SleepWakeDetector.State.SLEEPING || _ui.value.zone != zone || lastSentZone == zone) return@launch
-            val style = _ui.value.lightingTheme.styleFor(zone)
-            val brightness = _ui.value.brightnessOverride ?: style.brightness
-            var succeeded = false
-            val wizLights = selectedLights()
-            if (wizLights.isNotEmpty()) wiz.setColor(wizLights, style.color, brightness, style.temperature).fold(
-                onSuccess = { succeeded = true },
-                onFailure = { setError("Automation command failed: ${it.message}") }
-            )
-            hueCredentials()?.takeIf { selectedHueLights().isNotEmpty() }?.let { (ip, key) ->
-                hue.setColor(ip, key, selectedHueLights(), style.color, brightness, style.temperature).fold(
+            try {
+                val remaining = (lastCommandAt + MIN_COMMAND_INTERVAL_MS - System.currentTimeMillis()).coerceAtLeast(0)
+                delay(remaining)
+                if (!_ui.value.automationEnabled || _ui.value.automationPaused || sleepDetector.state == SleepWakeDetector.State.SLEEPING || _ui.value.zone != zone || lastSentZone == zone) return@launch
+                val style = _ui.value.lightingTheme.styleFor(zone)
+                val brightness = _ui.value.brightnessOverride ?: style.brightness
+                var succeeded = false
+                val wizLights = selectedLights()
+                if (wizLights.isNotEmpty()) wiz.setColor(wizLights, style.color, brightness, style.temperature).fold(
                     onSuccess = { succeeded = true },
-                    onFailure = { setError("Hue automation failed: ${it.message}") }
+                    onFailure = { setError("Automation command failed: ${it.message}") }
                 )
-            }
-            if (succeeded) {
+                hueCredentials()?.takeIf { selectedHueLights().isNotEmpty() }?.let { (ip, key) ->
+                    hue.setColor(ip, key, selectedHueLights(), style.color, brightness, style.temperature).fold(
+                        onSuccess = { succeeded = true },
+                        onFailure = { setError("Hue automation failed: ${it.message}") }
+                    )
+                }
+                if (succeeded) {
                     lastSentZone = zone
                     lastCommandAt = System.currentTimeMillis()
                     _ui.value = _ui.value.copy(lastCommand = "${_ui.value.lightingTheme.displayName}: ${zone.label}, $brightness%", error = null)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                setError("HR automation command failed: ${error.message ?: error::class.java.simpleName}")
             }
         }
     }
@@ -1069,6 +1135,7 @@ class LightingRuntime(private val application: Application) {
         healthJob?.cancel()
         watchdogJob?.cancel()
         circadianJob?.cancel()
+        sarahVsFeedJob?.cancel()
         stopSleepDetection()
         polar.close()
         precision.shutdown()
