@@ -11,8 +11,8 @@ android {
         applicationId = "com.pulsepointlabs.polarwiz"
         minSdk = 33
         targetSdk = 35
-        versionCode = 33
-        versionName = "1.0.12"
+        versionCode = 34
+        versionName = "1.0.13"
     }
 
     buildFeatures { viewBinding = true }

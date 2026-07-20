@@ -60,7 +60,7 @@ class AutomationKeepAliveService : Service() {
             notification,
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE else 0
         )
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
